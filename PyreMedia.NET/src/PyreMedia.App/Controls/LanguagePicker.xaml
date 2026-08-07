@@ -1,0 +1,64 @@
+<UserControl x:Class="PyreMedia.App.Controls.LanguagePicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <StackPanel>
+        <!-- Chosen languages, each removable. A list of codes in a text box gave
+             no sense of what was actually selected. -->
+        <ItemsControl x:Name="ChipList" Margin="0,0,0,6">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="0,0,6,6" Padding="10,4,4,4" CornerRadius="13"
+                            Background="{DynamicResource AccentFillColorDefaultBrush}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Display}" VerticalAlignment="Center"
+                                       FontSize="12" Foreground="White" />
+                            <Button Content="&#xE711;" Tag="{Binding}" Click="OnRemove"
+                                    FontFamily="Segoe MDL2 Assets" FontSize="9"
+                                    Foreground="White" Background="Transparent"
+                                    BorderThickness="0" Padding="6,0,4,0"
+                                    Cursor="Hand" ToolTip="Remove" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock x:Name="TxtEmpty" Text="Nothing selected - every track of this kind is kept."
+                   FontSize="11" Margin="0,0,0,6" Visibility="Collapsed"
+                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+        <ui:TextBox x:Name="TxtSearch" PlaceholderText="Type to find a language..."
+                    TextChanged="OnSearchChanged" KeyDown="OnSearchKey"
+                    GotFocus="OnSearchFocus" />
+
+        <!-- Suggestions appear only while searching, so the form stays compact -->
+        <Border x:Name="SuggestBox" Margin="0,4,0,0" CornerRadius="6" Visibility="Collapsed"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <ListBox x:Name="Suggestions" MaxHeight="180" BorderThickness="0"
+                     Background="Transparent"
+                     MouseDoubleClick="OnSuggestionPicked"
+                     SelectionChanged="OnSuggestionSelected">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Margin="0,2">
+                            <TextBlock Text="{Binding Name}" Width="170" />
+                            <TextBlock Text="{Binding Code}" FontSize="11"
+                                       FontFamily="Cascadia Mono, Consolas"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+    </StackPanel>
+</UserControl>

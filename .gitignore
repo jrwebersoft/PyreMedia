@@ -1,0 +1,46 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Publish output - rebuilt by publish.ps1, and a 64 MB binary has no business
+# in history.
+MediaScout4-App/
+MediaScout4-Release/
+
+# The decompiled 3.x tree. Kept locally as a behavioural reference only: it is
+# derived from a binary whose project carries no licence, so it must never be
+# committed or distributed.
+MediaScout-v3/Decompile/
+
+# The original 3.x source clones. Unlicensed upstream, and each already has its
+# own .git - they are reference material, not part of this project.
+MediaScout/
+MediaScout-v3/
+
+# The original 3.x compiled application. Someone else's binary, under no licence
+# that permits redistribution - never commit it.
+MediaScout-App/
+
+# Kodi scraper add-ons pulled down purely to read how they query the APIs.
+kodi-reference/
+
+# Local scratch
+*.log
+*.tmp
+
+# Published output - rebuilt on demand, 64 MB, not source
+PyreMedia.NET/publish/
+
+# Kept builds. The .exe stays out of history - 64 MB is permanent once committed
+# and cannot be pruned without rewriting it. Losing nothing by it: builds are
+# deterministic (verified - a clean rebuild reproduces the same SHA-256), so the
+# committed .sha256 beside each release is enough to rebuild that exact binary
+# from its tag and prove it matches.
+releases/**/*.exe
+
+# publish.ps1's working output. The copy that matters is kept under releases/.
+PyreMedia-Release/
+PyreMedia-Release-Small/

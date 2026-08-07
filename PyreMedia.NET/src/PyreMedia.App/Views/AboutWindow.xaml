@@ -1,0 +1,169 @@
+<ui:FluentWindow x:Class="PyreMedia.App.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="About PyreMedia"
+        Icon="../pyremedia.ico"
+        Height="720" Width="860"
+        MinHeight="420" MinWidth="520"
+        WindowStartupLocation="CenterOwner"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True">
+
+    <Window.Resources>
+        <Style x:Key="H" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style x:Key="Body" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+        <Style x:Key="Row" TargetType="Border">
+            <Setter Property="Padding" Value="0,6" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="About PyreMedia" ShowMaximize="True">
+            <ui:TitleBar.Icon>
+                <ui:SymbolIcon Symbol="Info24" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <!-- Identity -->
+        <Border Grid.Row="1" Margin="20,4,20,12" Padding="18,16" CornerRadius="8"
+                Background="{DynamicResource ControlFillColorDefaultBrush}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- The flame drawn as the vector it is, rather than an .ico scaled
+                     to 64: WPF picks the icon frame nearest the device size and
+                     stretches it, which is soft at any DPI above 100%. -->
+                <Viewbox Grid.Column="0" Width="64" Height="64"
+                         VerticalAlignment="Top" Margin="0,0,18,0">
+                    <Canvas Width="918.5" Height="1144.5">
+                        <Path Data="M494.500,1.500 C495.833,1.500 497.167,1.500 498.500,1.500 C493.476,34.087 487.369,66.688 481.500,103.500 C475.096,143.665 490.585,189.435 500.500,217.500 C524.834,286.379 565.576,334.797 601.500,390.500 C621.165,418.164 640.835,445.836 660.500,473.500 C661.167,473.167 661.833,472.833 662.500,472.500 C662.500,471.833 662.500,471.167 662.500,470.500 C663.500,461.834 664.500,453.166 665.500,444.500 C670.166,427.168 674.834,409.832 679.500,392.500 C702.081,336.982 740.818,283.163 787.500,251.500 C787.833,251.500 788.167,251.500 788.500,251.500 C788.500,252.833 788.500,254.167 788.500,255.500 C697.338,509.019 983.853,598.656 901.500,871.500 C891.014,906.240 873.217,938.137 854.500,965.500 C824.936,1008.721 784.786,1040.739 740.500,1069.500 C701.099,1095.088 659.713,1108.944 611.500,1128.500 C600.327,1133.032 571.372,1145.773 558.500,1141.500 C569.166,1135.501 579.834,1129.499 590.500,1123.500 C622.539,1102.776 652.608,1073.348 672.500,1040.500 C736.821,934.286 685.224,786.048 623.500,714.500 C622.833,714.833 622.167,715.167 621.500,715.500 C622.606,787.081 588.419,836.107 538.500,856.500 C540.227,832.236 547.956,801.115 552.500,773.500 C571.309,659.207 489.514,524.921 432.500,485.500 C431.833,486.167 431.167,486.833 430.500,487.500 C452.534,550.093 428.563,620.259 403.500,659.500 C345.069,750.986 184.413,839.589 243.500,1008.500 C258.588,1051.632 288.600,1084.864 320.500,1111.500 C337.832,1121.832 355.168,1132.168 372.500,1142.500 C328.647,1140.125 268.863,1117.039 236.500,1099.500 C127.728,1040.553 44.296,983.633 10.500,849.500 C2.351,817.156 -2.335,764.823 5.500,726.500 C18.772,661.582 50.593,613.744 76.500,562.500 C97.855,520.259 115.632,476.765 129.500,426.500 C138.208,394.937 144.203,348.583 138.500,310.500 C136.167,291.835 133.833,273.165 131.500,254.500 C147.183,265.286 158.534,284.856 169.500,300.500 C203.957,349.655 238.372,400.682 263.500,459.500 C272.832,486.831 282.168,514.169 291.500,541.500 C297.349,344.096 321.763,227.607 401.500,105.500 C427.483,65.710 466.139,38.007 494.500,1.500 Z">
+                            <Path.Fill>
+                                <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                                    <GradientStop Color="#FFAA00" Offset="0" />
+                                    <GradientStop Color="#FF6A00" Offset="0.45" />
+                                    <GradientStop Color="#E03000" Offset="1" />
+                                </LinearGradientBrush>
+                            </Path.Fill>
+                        </Path>
+                    </Canvas>
+                </Viewbox>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="PyreMedia" FontSize="24" FontWeight="Bold" />
+                    <TextBlock x:Name="TxtVersion" FontSize="12" Margin="0,2,0,0"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="Created by JRWeberSoft" FontSize="13" Margin="0,4,0,0"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0"
+                               Text="Renames and organises TV and film files, and strips unwanted audio and subtitle tracks by remuxing. Nothing is written to disk until you have seen it listed and approved it, and every change can be undone from History." />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="2" Margin="20,0,20,0" VerticalScrollBarVisibility="Auto"
+                      Padding="0,0,12,0">
+            <StackPanel>
+
+                <!-- Provenance -->
+                <ui:Card Margin="0,0,0,12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Origin and licensing" Style="{StaticResource H}" />
+                        <TextBlock Style="{StaticResource Body}"
+                                   Text="Created by JRWeberSoft. The engine, interface, providers, remux pipeline and metadata handling were all written from scratch on .NET 10. It is not a fork, a port or a repackaging of anything." />
+                        <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
+                                   Text="Inspired by MediaScout 3.x, a Windows renamer unmaintained for years." />
+                        <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
+                                   Text="Licensed under PolyForm Noncommercial 1.0.0 - free to use, change and share for any noncommercial purpose, including personal use and use by charities, schools and public bodies. Copyright 2026 jrwebersoft." />
+                        <ui:HyperlinkButton Content="github.com/jrwebersoft"
+                                            NavigateUri="https://github.com/jrwebersoft"
+                                            Padding="0,2" Margin="0,2,0,0" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Metadata sources -->
+                <ui:Card Margin="0,0,0,12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Metadata sources" Style="{StaticResource H}" />
+
+                        <StackPanel x:Name="PanelSources" />
+
+                        <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0"
+                                   Text="Searching always goes through TMDb: TheTVDB retired its legacy search endpoint, though its by-id episode data is still served and is what libraries built with MediaScout 3.x were numbered against. Both are queried in Merged mode so a gap in one does not lose an episode." />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- External tools -->
+                <ui:Card Margin="0,0,0,12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="External tools" Style="{StaticResource H}" />
+                        <TextBlock Style="{StaticResource Body}"
+                                   Text="Not bundled. Install them separately and set their paths in Settings if they are not on PATH." />
+
+                        <StackPanel x:Name="PanelTools" Margin="0,8,0,0" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Libraries -->
+                <ui:Card Margin="0,0,0,12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Libraries" Style="{StaticResource H}" />
+                        <StackPanel x:Name="PanelLibs" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Where things live -->
+                <ui:Card Margin="0,0,0,12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Files this app writes" Style="{StaticResource H}" />
+                        <TextBlock Style="{StaticResource Body}" Margin="0,0,0,10"
+                                   Text="All inside the profile of whoever is signed in - %APPDATA% resolves per user, so this build writes to your folders on your machine and to theirs on anyone else's. Nothing is written beside the .exe, and nothing carries over between accounts. Paste any of these into Explorer and it will open." />
+                        <StackPanel x:Name="PanelPaths" />
+                    </StackPanel>
+                </ui:Card>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="3" Padding="20,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" VerticalAlignment="Center" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,0,16,0"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                           Text="Data from TMDb and TheTVDB. This product uses the TMDb API but is not endorsed or certified by TMDb." />
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <ui:Button Content="Copy details" Icon="{ui:SymbolIcon DocumentText24}"
+                               Click="OnCopy" Appearance="Secondary" Margin="0,0,8,0"
+                               ToolTip="Copy versions and paths, for when something needs diagnosing" />
+                    <ui:Button Content="Close" Click="OnClose" Appearance="Primary" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

@@ -1,0 +1,400 @@
+<ui:FluentWindow x:Class="PyreMedia.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:ctl="clr-namespace:PyreMedia.App.Controls"
+        Title="Settings"
+        Height="720" Width="700"
+        MinHeight="420" MinWidth="560"
+        WindowStartupLocation="CenterOwner"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True"
+        ResizeMode="CanResize">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Settings" ShowMaximize="False" />
+
+        <ScrollViewer Grid.Row="1" Margin="20,4,20,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <!-- Folders -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Media folders" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBlock Text="TV and movies can live together - each item is detected automatically. Loose files in the root are picked up too."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <ListBox x:Name="FolderList" Height="110" Margin="0,0,0,8" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button Content="Add" Click="OnAddFolder" Appearance="Secondary" Margin="0,0,8,0" />
+                            <ui:Button Content="Remove" Click="OnRemoveFolder" Appearance="Secondary" />
+                        </StackPanel>
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Language & tracks -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Language and remux" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Your language" Margin="0,0,0,4" />
+                        <ctl:LanguagePicker x:Name="PickPreferred" SingleSelect="True" AllowEmpty="False"
+                                            MaxWidth="380" HorizontalAlignment="Left" Margin="0,0,0,12" />
+
+                        <CheckBox x:Name="ChkFlagForeign"
+                                  Content="Flag files containing audio in another language"
+                                  Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,12"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Reads every file with ffprobe after a scan, then badges the affected rows in the library list. Runs in the background, but it is a full pass over your files." />
+
+                        <TextBlock Text="Keep audio languages" Margin="0,0,0,4" />
+                        <ctl:LanguagePicker x:Name="PickKeepAudio" MaxWidth="380"
+                                            HorizontalAlignment="Left" Margin="0,0,0,12" />
+                        <TextBlock Text="Keep subtitle languages" Margin="0,0,0,4" />
+                        <ctl:LanguagePicker x:Name="PickKeepSubs" MaxWidth="380"
+                                            HorizontalAlignment="Left" Margin="0,0,0,12" />
+
+                        <CheckBox x:Name="ChkKeepUnd" Content="Keep tracks with no language tag (und)" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkKeepForced"
+                                  Content="Keep forced subtitles in my preferred language" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Forced tracks carry dialogue you're meant to read - alien speech, on-screen text - so they survive even if the subtitle language rules would drop them. Forced tracks in other languages are still removed." />
+
+                        <CheckBox x:Name="ChkArchive"
+                                  Content="Keep the pre-remux file in an archive folder" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,8"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Moved into a hidden subfolder beside the file rather than the Recycle Bin - it survives emptying and has no size cap. The move is instant because it stays on the same drive. Archived files are excluded from scans. Untick to recycle instead." />
+                        <TextBlock Text="Archive location (leave empty to keep originals beside each file)"
+                                   Margin="0,0,0,4" />
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox Grid.Column="0" x:Name="TxtArchiveRoot"
+                                        PlaceholderText="(beside each file)" Margin="0,0,8,0" />
+                            <ui:Button Grid.Column="1" Content="Browse" Click="OnBrowseArchive"
+                                       Appearance="Secondary" Margin="0,0,6,0" />
+                            <ui:Button Grid.Column="2" Content="Clear" Click="OnClearArchive"
+                                       Appearance="Secondary" />
+                        </Grid>
+                        <TextBlock x:Name="TxtArchiveWarn" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                                   Visibility="Collapsed" />
+
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                <TextBlock Text="Subfolder name (when no location set)" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtArchiveFolder" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Filename suffix" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtArchiveSuffix" />
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Text="ffmpeg / ffprobe paths" Margin="0,0,0,4" />
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox Grid.Column="0" x:Name="TxtFfmpeg" Margin="0,0,8,0" />
+                            <ui:TextBox Grid.Column="1" x:Name="TxtFfprobe" />
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <TextBlock x:Name="TxtFfmpegStatus" FontSize="11" VerticalAlignment="Center"
+                                       Margin="0,0,10,0" />
+                            <ui:HyperlinkButton x:Name="LinkFfmpeg" Content="Get ffmpeg"
+                                                NavigateUri="https://www.gyan.dev/ffmpeg/builds/"
+                                                FontSize="11" Padding="0" />
+                        </StackPanel>
+
+                        <CheckBox x:Name="ChkPreferMkv"
+                                  Content="Use mkvmerge for MKV files when available" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,6"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="mkvmerge copies tracks without decoding them, so 3D MVC survives a remux. ffmpeg only understands the base view and would discard the second eye." />
+                        <TextBlock Text="mkvmerge path" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtMkvMerge" Margin="0,0,0,4" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="TxtMkvStatus" FontSize="11" VerticalAlignment="Center"
+                                       Margin="0,0,10,0" />
+                            <ui:HyperlinkButton x:Name="LinkMkv" Content="Get MKVToolNix"
+                                                NavigateUri="https://mkvtoolnix.download/downloads.html"
+                                                FontSize="11" Padding="0" />
+                        </StackPanel>
+
+                        <!-- Optional, and for one repair only. Kept last so it doesn't
+                             read as another thing that needs installing. -->
+                        <TextBlock Text="dovi_tool path (optional)" Margin="0,12,0,4" />
+                        <ui:TextBox x:Name="TxtDoviTool" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Only needed to repair a file that still holds its Dolby Vision data but no longer declares it - what a remux into MP4 leaves behind. Neither ffmpeg nor mkvmerge can rebuild that; this can. There is no winget package, so it's a single file from the author's releases." />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="TxtDoviStatus" FontSize="11" VerticalAlignment="Center"
+                                       Margin="0,0,10,0" />
+                            <ui:HyperlinkButton x:Name="LinkDovi" Content="Get dovi_tool"
+                                                NavigateUri="https://github.com/quietvoid/dovi_tool/releases"
+                                                FontSize="11" Padding="0" />
+                        </StackPanel>
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Cleanup -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="NFO files" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBlock Text="Kodi-format sidecar metadata. Kodi scrapes for itself, so these matter most for offline libraries or players that only read sidecars."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <CheckBox x:Name="ChkWriteNfo" Content="Download metadata and write a .nfo beside each file" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkMergeNfo"
+                                  Content="Combine with an existing .nfo rather than replacing it"
+                                  Margin="0,0,0,2" />
+                        <TextBlock Text="New titles, plots and stream details are taken; play counts, last played, resume points, ratings and anything hand-added are kept."
+                                   TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
+                        <CheckBox x:Name="ChkPreserveNfo" Content="Never overwrite an existing .nfo" Margin="0,0,0,2" />
+                        <TextBlock Text="Only applies when combining is off - otherwise there is nothing to lose by writing."
+                                   TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
+                        <CheckBox x:Name="ChkDownloadArt" Content="Download poster and fanart beside each file" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkPreserveArt" Content="Never overwrite artwork that is already there" Margin="0,0,0,6" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Written as &lt;name&gt;-poster.jpg and &lt;name&gt;-fanart.jpg, which is where Kodi looks and which follows the video through a rename. A library Kodi already scrapes has its own; this is for one it doesn't, or for files going to a player that never scrapes." />
+                        <CheckBox x:Name="ChkUpdateNfoRemux" Content="Refresh track details in the .nfo after a remux" Margin="0,0,0,0" />
+                    </StackPanel>
+                </ui:Card>
+
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Cleanup" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBlock Text="Off by default. Anything selected here still appears as a tickable row in the preview - nothing is ever deleted without you approving it."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <CheckBox x:Name="ChkDeleteSamples" Content="Offer to delete sample clips" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkDeleteJunk" Content="Offer to delete leftover files (.nfo, .txt, .sfv ...)" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkRecycleBin" Content="Send deletions to the Recycle Bin"
+                                  Margin="0,0,0,6" Checked="OnRecycleBinChanged" Unchecked="OnRecycleBinChanged" />
+                        <TextBlock x:Name="TxtRecycleWarn" Visibility="Collapsed"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        <TextBlock Text="Leftover file extensions" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtJunkExt" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Movies -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Movies" FontWeight="SemiBold" Margin="0,0,0,10" />
+                        <CheckBox x:Name="ChkRenameMovies" Content="Rename movie files" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkKeep3D" Content="Keep 3D tags in filenames, e.g. (3D-HSBS)"
+                                  Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,8"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Half-SBS carries no 3D flag inside the file at all - the filename is the only record. The tag is stripped before searching, then put back on the new name." />
+                        <CheckBox x:Name="ChkMove3D" Content="Move 3D files into a subfolder" Margin="0,0,0,6" />
+                        <TextBlock Text="Subfolder name for 3D" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtExtrasFolder" Width="200" HorizontalAlignment="Left"
+                                    Margin="0,0,0,10" />
+                        <CheckBox x:Name="ChkMovieFolderPer" Content="Give each movie its own folder" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Movie file format" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtMovieFileFormat" Margin="0,0,0,10" />
+                        <TextBlock Text="Movie folder format" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtMovieFolderFormat" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="{}{title}   {year}" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Naming -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="TV naming" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Filename format" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtFormat" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" Margin="0,0,0,12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="{}{title} series   {season} padded   {episode} padded   {name} episode title.  The old {}{0}-{3} numbering still works." />
+                        <TextBlock x:Name="TxtFormatPreview" FontSize="11" Margin="0,0,0,12"
+                                   Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
+
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                <TextBlock Text="Season number padding" Margin="0,0,0,4" />
+                                <ui:NumberBox x:Name="NumSeasonPad" Minimum="0" Maximum="4" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Episode number padding" Margin="0,0,0,4" />
+                                <ui:NumberBox x:Name="NumEpisodePad" Minimum="0" Maximum="4" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                <TextBlock Text="Season folder word" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtSeasonWord" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Specials folder name" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtSpecials" />
+                            </StackPanel>
+                        </Grid>
+
+                        <CheckBox x:Name="ChkRenameFolder"
+                                  Content="Rename the containing folder to match the title"
+                                  Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,8"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Works independently of moving files. Never applies to loose files in a scan root - their folder IS the root." />
+                        <TextBlock Text="Show folder format" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtFolderFormat" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="{}{title}   {year}.  &quot;Title (Year)&quot; is what Kodi recommends." />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Behaviour -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Behaviour" FontWeight="SemiBold" Margin="0,0,0,10" />
+                        <CheckBox x:Name="ChkRename" Content="Rename episode files" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkMove" Content="Move episodes into season folders" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkOverwrite" Content="Overwrite existing files at the target path" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkAutoSelect" Content="Automatically pick the first search result" Margin="0,0,0,6" />
+                        <CheckBox x:Name="ChkCombineSeasons"
+                                  Content="Show a series split across folders as one entry"
+                                  Margin="0,0,0,2" />
+                        <TextBlock Text="Eight folders of one show become one entry to match. Folders whose year or season numbers disagree are always left separate."
+                                   TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- File types -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="File types" FontWeight="SemiBold" Margin="0,0,0,10" />
+                        <TextBlock Text="Video extensions (semicolon separated)" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtVideoExt" Margin="0,0,0,10" />
+                        <TextBlock Text="Subtitle extensions" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtSubExt" />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Metadata -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Metadata" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Episode data source" Margin="0,0,0,4" />
+                        <ComboBox x:Name="CmbSource" Margin="0,0,0,4">
+                            <ComboBoxItem Content="TheTVDB only" />
+                            <ComboBoxItem Content="TMDb only" />
+                            <ComboBoxItem Content="All sources, merged (recommended)" />
+                        </ComboBox>
+                        <CheckBox x:Name="ChkTvMaze" Content="Use TVmaze as a fallback"
+                                  Margin="0,6,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,0"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Only queried when TMDb and TheTVDB both return nothing. Free, no key. Measured against real shows it added no episodes the other two lacked, so it isn't worth a request on every lookup - but it costs nothing as a safety net." />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Searching always uses TMDb, because TheTVDB retired its search endpoint. This setting controls episode lists only. Merged queries both and combines them - TMDb usually lists more episodes, TheTVDB often has specials TMDb lacks." />
+
+                        <TextBlock Text="My Kodi library scrapes" Margin="0,0,0,4" />
+                        <ComboBox x:Name="CmbKodiSource" Margin="0,0,0,4" Width="200" HorizontalAlignment="Left">
+                            <ComboBoxItem Content="TMDb (Kodi default)" />
+                            <ComboBoxItem Content="TheTVDB (separate addon)" />
+                        </ComboBox>
+                        <CheckBox x:Name="ChkKodiWarn"
+                                  Content="Warn when an episode won't match in Kodi" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="22,0,0,12"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Merging pulls episodes from several sources. Kodi assigns one scraper per media source - though you can point different sources at different scrapers, and add-ons exist that combine them - so an episode found only elsewhere gets the right filename yet may still show as unmatched, depending on how your library is set up. This flags those in the preview so it isn't a mystery later." />
+
+                        <TextBlock Text="Language" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtLanguage" Width="80" HorizontalAlignment="Left" Margin="0,0,0,12" />
+
+                        <TextBlock Text="TMDb API key  -  required" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtTmdbKey" Margin="0,0,0,2" />
+                        <ui:HyperlinkButton Content="themoviedb.org/settings/api"
+                                            NavigateUri="https://www.themoviedb.org/settings/api"
+                                            Padding="0,2" Margin="0,0,0,10" />
+
+                        <TextBlock Text="TheTVDB API key  -  optional, episode data only" Margin="0,0,0,4" />
+                        <ui:TextBox x:Name="TxtTvdbKey" Margin="0,0,0,2" />
+                        <ui:HyperlinkButton Content="thetvdb.com/api-information/signup"
+                                            NavigateUri="https://thetvdb.com/api-information/signup"
+                                            Padding="0,2" Margin="0,0,0,4" />
+
+                        <TextBlock FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Text="Both are free. No key is shipped with the program - a key belongs to the account that registered it, and a shared one gets revoked." />
+                    </StackPanel>
+                </ui:Card>
+
+                <!-- Search term filters -->
+                <ui:Card Margin="0,0,0,12" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Search term filters" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="Regex of noise removed from a folder name to suggest a search term." />
+                        <ui:TextBox x:Name="TxtFilters" TextWrapping="Wrap" AcceptsReturn="True" Height="80" />
+                    </StackPanel>
+                </ui:Card>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Padding="20,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Left, away from Save: a way back when too much has been
+                     changed to remember what was changed. -->
+                <ui:Button Grid.Column="0" Content="Reset to defaults"
+                           Icon="{ui:SymbolIcon ArrowUndo24}"
+                           Click="OnResetDefaults" Appearance="Secondary"
+                           ToolTip="Put every option back to how it shipped. Your folders are kept, and the current settings are backed up first." />
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <ui:Button Content="Cancel" Click="OnCancel" Appearance="Secondary" Margin="0,0,8,0" />
+                    <ui:Button Content="Save" Click="OnSave" Appearance="Primary" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

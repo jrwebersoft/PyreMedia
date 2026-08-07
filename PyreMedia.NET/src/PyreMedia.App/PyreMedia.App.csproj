@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>PyreMedia</AssemblyName>
+    <RootNamespace>PyreMedia.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>pyremedia.ico</ApplicationIcon>
+    <Version>1.1.0</Version>
+    <Product>PyreMedia</Product>
+
+    <!-- What Windows shows under the file's Details tab. -->
+    <Company>JRWeberSoft</Company>
+    <Authors>JRWeberSoft</Authors>
+    <AssemblyTitle>PyreMedia</AssemblyTitle>
+    <Description>Renames and organises TV and film files, and strips unwanted tracks by remuxing.</Description>
+    <Copyright>Copyright 2026 jrwebersoft (https://github.com/jrwebersoft)</Copyright>
+    <PackageLicenseExpression>PolyForm-Noncommercial-1.0.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/jrwebersoft</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PyreMedia.Core\PyreMedia.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Also as a resource, so windows and the taskbar use it at runtime and
+         not just the .exe in Explorer. -->
+    <Resource Include="pyremedia.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+</Project>
