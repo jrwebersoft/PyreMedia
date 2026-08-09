@@ -3,4 +3,13 @@
     <Project Path="src/PyreMedia.App/PyreMedia.App.csproj" />
     <Project Path="src/PyreMedia.Core/PyreMedia.Core.csproj" />
   </Folder>
+  <!--
+    The manual generator builds with everything else on purpose. Left out, a
+    change that breaks it compiles clean and stays broken until somebody goes to
+    rebuild the manual - and it reaches into the app's real windows, so it is
+    exactly the thing a window change breaks.
+  -->
+  <Folder Name="/tools/">
+    <Project Path="tools/ManualBuilder/ManualBuilder.csproj" />
+  </Folder>
 </Solution>
