@@ -44,3 +44,11 @@ releases/**/*.exe
 # publish.ps1's working output. The copy that matters is kept under releases/.
 PyreMedia-Release/
 PyreMedia-Release-Small/
+
+# API keys. A working build carries its owner's keys in a file beside the exe
+# rather than in the source, because a key in the repository is public the
+# moment the repository is, whatever is deleted afterwards. This tree is the
+# published one and should never hold such a file at all - the rule is here so
+# that copying a working build across cannot quietly stage one.
+keys.local.json
+**/keys.local.json
