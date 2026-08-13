@@ -56,4 +56,6 @@ keys.local.json
 # how it got built - and a file of half-finished thoughts is the easiest way for
 # something private to reach it by accident.
 TODO.md
+BLURB.md
+docs/BLURB.md
 next.md

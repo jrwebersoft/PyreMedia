@@ -2,10 +2,10 @@
 # caused a real bug. Files are a few KB, so a full scan-rename-verify cycle is
 # instant and nothing valuable is at risk.
 #
-#   .\make-fixtures.ps1              -> H:\_MediaScout-Fixtures
+#   .\make-fixtures.ps1              -> %TEMP%\PyreMedia-Fixtures
 #   .\make-fixtures.ps1 -Root D:\tmp -> somewhere else
 
-param([string]$Root = 'H:\_MediaScout-Fixtures')
+param([string]$Root = "$env:TEMP\PyreMedia-Fixtures")
 
 $ErrorActionPreference = 'Stop'
 
