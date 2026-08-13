@@ -48,6 +48,16 @@ public sealed class RevertResult
 public sealed class RevertService(RenameHistory history)
 {
     /// <summary>
+    /// How to put a file's tags back, given the entry that recorded changing
+    /// them. Returns null on success or a reason on failure.
+    ///
+    /// Supplied by the caller rather than constructed here, because undoing a
+    /// tag write needs ffmpeg and the film and television side has no business
+    /// depending on that to rename an episode.
+    /// </summary>
+    public Func<HistoryEntry, string?>? Retag { get; set; }
+
+    /// <summary>
     /// Check what could actually be undone, without touching anything.
     /// <para>
     /// This has to walk the entries in the same order <see cref="Revert"/> will,
@@ -82,6 +92,42 @@ public sealed class RevertService(RenameHistory history)
                     Entry = e,
                     State = RevertState.NotRevertible,
                     Reason = "Deleted - restore it from the Recycle Bin"
+                };
+                continue;
+            }
+
+            if (e.Action == HistoryAction.Retag)
+            {
+                // Both paths are the same file, so the usual "has the target
+                // been taken?" test reads every retag as blocked. What decides
+                // it is whether the old values were recorded - history written
+                // before Before existed cannot be undone, and saying so is
+                // better than offering a revert that quietly does nothing.
+                results[i] = new RevertCandidate
+                {
+                    Entry = e,
+                    State = !File.Exists(e.NewPath) ? RevertState.SourceMissing
+                          : e.Before is null or { Count: 0 } ? RevertState.NotRevertible
+                          : RevertState.Ready,
+                    Reason = e.Before is null or { Count: 0 }
+                        ? "the tags this replaced were not recorded"
+                        : null
+                };
+                continue;
+            }
+
+            if (e.Action == HistoryAction.Copy)
+            {
+                // Undoing a copy means removing the copy. The original never
+                // went anywhere, so finding it still in place is the normal
+                // case - judging this by the usual rule would call every copy
+                // TargetOccupied and refuse to undo any of them.
+                var copy = Locate(e.NewPath, applied);
+
+                results[i] = new RevertCandidate
+                {
+                    Entry = e,
+                    State = File.Exists(copy) ? RevertState.Ready : RevertState.SourceMissing
                 };
                 continue;
             }
@@ -176,6 +222,49 @@ public sealed class RevertService(RenameHistory history)
             {
                 var from = Locate(e.NewPath, standing);
                 var to = Locate(e.OldPath, standing);
+
+                if (e.Action == HistoryAction.Retag)
+                {
+                    if (Retag is null)
+                    {
+                        result.Skipped++;
+                        log?.Report($"Skipped: '{e.NewName}' - no tag writer was supplied");
+                        continue;
+                    }
+
+                    var error = Retag(e);
+
+                    if (error is null) { result.Reverted++; log?.Report($"Tags put back: {e.NewName}"); }
+                    else { result.Failed++; result.Errors.Add($"{e.NewName}: {error}"); }
+
+                    continue;
+                }
+
+                if (e.Action == HistoryAction.Copy)
+                {
+                    if (!File.Exists(from))
+                    {
+                        result.Skipped++;
+                        log?.Report($"Skipped: '{e.NewName}' is no longer there");
+                        continue;
+                    }
+
+                    // Only ever the duplicate. If the original is somehow gone,
+                    // this copy is the last of it and deleting it would lose the
+                    // recording outright.
+                    if (!File.Exists(to))
+                    {
+                        result.Skipped++;
+                        log?.Report($"Skipped: '{e.NewName}' is the only copy left - "
+                                  + $"nothing remains at '{e.OldPath}'");
+                        continue;
+                    }
+
+                    File.Delete(from);
+                    result.Reverted++;
+                    log?.Report($"Removed the copy: {e.NewName}");
+                    continue;
+                }
 
                 if (e.Action == HistoryAction.FolderRename)
                 {

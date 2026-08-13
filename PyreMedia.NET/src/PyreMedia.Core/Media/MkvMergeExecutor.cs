@@ -339,7 +339,7 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
         {
             if (!subs.Contains(theirsSubs[i].Id)) continue;
 
-            var forced = mineSubs[i].IsForced;
+            var forced = plan.IsForced(mineSubs[i]);
             var isDefault = forced || plan.DefaultSubtitleIndex == mineSubs[i].Index;
 
             args.Add("--default-track-flag");
@@ -387,40 +387,17 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
             return $"output has {info.Audio.Count()} audio track(s), expected "
                    + plan.Keep.Count(s => s.Kind == StreamKind.Audio);
 
-        if (plan.Info.DurationSeconds > 0 && info.DurationSeconds > 0)
-        {
-            var drift = Math.Abs(plan.Info.DurationSeconds - info.DurationSeconds);
-            if (drift > 2.0) return $"duration changed by {drift:F1}s";
-        }
+        // Measured against the tracks being kept rather than the source
+        // container. See DurationCheck - the flat two seconds this used to
+        // allow rejected a good remux of a film whose foreign audio ran a
+        // minute past the picture.
+        if (DurationCheck.Failed(plan.Info, info, plan.Keep) is { } truncated) return truncated;
 
-        // For MVC, size is the tell that the dependent view survived: losing it
-        // would roughly halve the video payload.
-        if (plan.HasMvc)
-        {
-            var before = plan.Info.SizeBytes > 0 ? plan.Info.SizeBytes : 0;
-            var after = new FileInfo(temp).Length;
+        if (OutputCheck.TooSmall(temp, plan.Info, plan.HasMvc) is { } small) return small;
 
-            if (before > 0 && after < before * 0.55)
-                return $"output is {after * 100 / before}% of the original - the MVC view may have been lost";
-        }
-
-        // mkvmerge is the engine that's meant to carry Dolby Vision across, but
-        // "meant to" isn't "did" - check, because losing it is invisible in
-        // playback until the wrong colours show up.
-        var sourceDv = plan.Info.Video.FirstOrDefault(v => v.IsDolbyVision);
-        if (sourceDv is not null)
-        {
-            var outDv = info.Video.FirstOrDefault(v => v.IsDolbyVision);
-
-            if (outDv is null)
-                return $"Dolby Vision was lost ({sourceDv.DvLabel} in the original, none in the output)";
-
-            if (sourceDv.DvProfile != outDv.DvProfile)
-                return $"Dolby Vision profile changed from {sourceDv.DvProfile} to {outDv.DvProfile}";
-
-            if (sourceDv.DvHasEnhancementLayer && !outDv.DvHasEnhancementLayer)
-                return "the Dolby Vision enhancement layer was lost";
-        }
+        // mkvmerge is the engine that is meant to carry Dolby Vision
+        // across, but "meant to" is not "did".
+        if (OutputCheck.DolbyVisionLost(plan.Info, info) is { } dv) return dv;
 
         return null;
     }

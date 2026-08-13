@@ -16,11 +16,30 @@ internal static class Manual
 
         string Img(string key, string caption)
         {
-            // A picture that failed to render is left out rather than replaced with
-            // a notice about it. The prose stands on its own, and a bracketed
-            // apology in the middle of a manual reads worse than no picture.
+            // A picture that could not be taken leaves a slot behind saying what
+            // belongs there.
+            //
+            // It used to be left out entirely, on the reasoning that a bracketed
+            // apology mid-chapter reads worse than no picture. That holds for a
+            // finished manual and not for this one: the windows can only be
+            // photographed from a desktop session, so a build run anywhere else
+            // silently produced a manual short of pictures that looked complete.
+            // Nothing said which were missing, or that any were.
+            //
+            // Shaped like the figure it will become, so the page does not reflow
+            // when the real one arrives.
             if (!shots.TryGetValue(key, out var path) || !File.Exists(path))
-                return "";
+            {
+                return $"""
+                        <figure>
+                          <div class="pending">
+                            <strong>Picture to come</strong>
+                            <span>{Escape(caption)}</span>
+                            <code>{Escape(key)}</code>
+                          </div>
+                        </figure>
+                        """;
+            }
 
             var data = Convert.ToBase64String(File.ReadAllBytes(path));
             return $"""
@@ -78,6 +97,15 @@ internal static class Manual
               }
               figcaption { color: var(--dim); font-size: .85rem; margin-top: .5rem; }
               .missing { color: var(--warn); font-style: italic; }
+              .pending {
+                border: 1px dashed var(--line); border-radius: 8px; background: var(--panel);
+                padding: 2.5rem 1.25rem; text-align: center;
+                display: flex; flex-direction: column; gap: .4rem; align-items: center;
+              }
+              .pending strong { color: var(--warn); font-size: .8rem; letter-spacing: .08em;
+                                text-transform: uppercase; }
+              .pending span { color: var(--dim); font-size: .9rem; max-width: 34rem; }
+              .pending code { font-size: .75rem; color: var(--dim); }
               .note, .warn {
                 background: var(--panel); border-left: 3px solid var(--accent);
                 border-radius: 0 6px 6px 0; padding: .85rem 1.1rem; margin: 1.25rem 0;
@@ -121,6 +149,13 @@ internal static class Manual
                 <li><a href="#renumber">Episodes numbered wrongly</a></li>
                 <li><a href="#remux">Remuxing: dropping tracks you don't want</a></li>
                 <li><a href="#dv">Dolby Vision</a></li>
+                <li><a href="#audio">Music and audiobooks</a></li>
+                <li><a href="#naming">Where music files go</a></li>
+                <li><a href="#duplicates">Duplicates, and how it tells them apart</a></li>
+                <li><a href="#gaps">Filling an album's gaps from elsewhere</a></li>
+                <li><a href="#tags">Tag problems</a></li>
+                <li><a href="#books">Audiobooks</a></li>
+                <li><a href="#tidy">Cleaning up, and quarantine</a></li>
                 <li><a href="#nfo">.nfo files and Kodi</a></li>
                 <li><a href="#history">History and undo</a></li>
                 <li><a href="#settings">Settings</a></li>
@@ -259,6 +294,23 @@ internal static class Manual
               <tr><td>Skip</td>
                   <td>Nothing happens to either file.</td></tr>
             </table>
+
+            <p>Those three set one row. Two more buttons decide the whole list at once,
+            by asking the same question of every pair rather than applying one answer to
+            all of them:</p>
+
+            <table>
+              <tr><th>Rule</th><th>What happens</th></tr>
+              <tr><td>Keep the newer</td>
+                  <td>Replace where the incoming file is newer, skip where it isn't.</td></tr>
+              <tr><td>Keep the larger</td>
+                  <td>Replace where the incoming file is bigger, skip where it isn't.
+                      Bigger usually means a better rip, and does not always - a
+                      bloated re-encode is bigger than the remux it came from.</td></tr>
+            </table>
+
+            <p>Both leave every row visible with its decision shown, so a rule that got
+            one pair wrong can be changed back before anything happens.</p>
 
             <div class="warn">
               <p>Deletions are the one thing undo cannot reverse. On a fixed drive they
@@ -440,11 +492,280 @@ internal static class Manual
             manufactured from a profile 5 file: the base layer isn't HDR10, so there is
             nothing to fall back to.</p>
 
+            <h2 id="audio">Music and audiobooks</h2>
+
+            <p>The window has two tabs. <strong>Video</strong> is everything above:
+            films and television. <strong>Audio</strong> is music and audiobooks, and
+            works the same way - scan, look at what it proposes, press Apply.</p>
+
+            <p>Inside Audio there is a second row: <em>All audio</em>, <em>Music</em>,
+            <em>Audiobooks</em>. It only narrows what the list shows.</p>
+
+            {{IMG_AUDIO}}
+
+            <p>Music needs no accounts. Everything except one optional feature runs on
+            your own machine with no network at all. What it does want is
+            <strong>ffmpeg</strong>, and it says plainly what stops working without it
+            rather than quietly doing less.</p>
+
+            <div class="note">
+            <p><strong>A scan takes a few minutes on a large library.</strong> Seventeen
+            thousand files is about six seconds of reading tags on a local disk and
+            considerably longer over a network share. There is a bar and an estimate; it
+            declines to guess the time until it has enough files behind it to say
+            something true.</p>
+            </div>
+
+            <h3>What a scan does</h3>
+
+            <ol>
+              <li>Reads the tags out of every audio file.</li>
+              <li>Reads what else the folders say - a scraped <code>album.nfo</code>
+                  often knows the year, the exact track lengths and the MusicBrainz
+                  identifiers that the files themselves do not.</li>
+              <li>Groups the tracks into albums.</li>
+              <li>Measures the length of any track whose number collides with another,
+                  because that is what tells a duplicate from a different version.</li>
+              <li>Compares the audio itself where the tags cannot settle it.</li>
+              <li>Works out where every file should go.</li>
+            </ol>
+
+            <p>Nothing is written until Apply. Apply then finishes the job: it moves the
+            music, writes any tag corrections you asked for, and offers to clear out
+            everything that is not music and any folders left empty. Those last two are
+            offered rather than done.</p>
+
+            <h2 id="naming">Where music files go</h2>
+
+            <p>The layout is a pattern you can change:</p>
+
+            <pre>{albumartist}/{album}[ ({year})]/[{disc}-]{track:00} {title}</pre>
+
+            <p>Braces are fields. Square brackets are optional sections that disappear
+            <em>whole</em> when a field inside them is empty - which is what lets one
+            pattern serve a library where some albums have a year and some do not. Disc
+            numbers only appear on real multi-disc sets.</p>
+
+            <p>A worked example updates underneath as you type, and problems are named
+            before a scan rather than after it: an unknown field, unpaired brackets, or a
+            pattern with no title or track number in it, which would land every song on
+            an album on the same filename.</p>
+
+            <table>
+              <tr><th>Field</th><th>What it is</th></tr>
+              <tr><td><code>{albumartist}</code></td><td>Who the album is by. "Various Artists" on a compilation.</td></tr>
+              <tr><td><code>{artist}</code></td><td>Who this track is by, which on a compilation is not the album artist.</td></tr>
+              <tr><td><code>{album}</code></td><td>The album title.</td></tr>
+              <tr><td><code>{title}</code></td><td>The track title.</td></tr>
+              <tr><td><code>{year}</code></td><td>Four digits, where the file knows them.</td></tr>
+              <tr><td><code>{track}</code>, <code>{disc}</code></td><td>Numbers. Pad them: <code>{track:00}</code>.</td></tr>
+              <tr><td><code>{initial}</code></td><td>First letter of the album artist, for A/B/C folders. "The" is ignored, so the Beatles file under B.</td></tr>
+              <tr><td><code>{genre}</code></td><td>As tagged. Often empty and often wrong; use with care.</td></tr>
+            </table>
+
+            <p>Three presets sit under the box: <em>Artist / Album</em>, <em>Under a
+            letter</em> (worth having when one folder would otherwise hold two and a half
+            thousand artists), and <em>Artist - Title</em>.</p>
+
+            <div class="note">
+            <p><strong>Filing the same library twice changes nothing the second time.</strong>
+            That sounds obvious and is not - a rule that reads a folder name it wrote
+            itself can move the same album on every scan, for ever. It is checked.</p>
+            </div>
+
+            <h2 id="duplicates">Duplicates, and how it tells them apart</h2>
+
+            <p>Two files claiming track 4 of one album are one of three things: the same
+            recording twice, the same song in two different versions, or two different
+            songs where somebody numbered one wrongly. Only the first is a duplicate, and
+            deleting a file on a wrong guess is the mistake this program is built to
+            avoid.</p>
+
+            <p>Titles and durations get it right most of the time. Measured against a real
+            library of seventeen thousand files, they agreed with the audio 95.2% of the
+            time - and the 4.8% that disagreed was not evenly harmless. Seventeen
+            duplicates were missed because the titles were spelt differently. Two questions
+            were asked that needn't have been. And one pair - two files of identical 4:58
+            duration, same title, sharing only 60.5% of their audio - would have had one of
+            them deleted as a copy of something it is not.</p>
+
+            <p>So <strong>Compare the audio when in doubt</strong> is on by default. It
+            uses an acoustic fingerprint, which is a summary of what the recording
+            actually sounds like, and it needs no account and no network. It runs only on
+            the files whose track numbers collide, which is about one in twenty, and costs
+            roughly four tenths of a second each.</p>
+
+            <p>With it on, that same library had <strong>nothing left to ask</strong>.</p>
+
+            <p>What it finds redundant is <em>never deleted</em>. See
+            <a href="#tidy">quarantine</a>.</p>
+
+            <h2 id="gaps">Filling an album's gaps from elsewhere in the library</h2>
+
+            <p>A song sits on its own album and on three soundtracks, and a library
+            assembled over thirty years routinely holds one of those and not the other.
+            The album is missing track 7; track 7 is on disk, filed under a film.</p>
+
+            <p>Where that is the case the file can be <em>copied</em> in - copied, not
+            moved, because the soundtrack is a real album too and taking a track out of
+            it to repair another one just moves the hole.</p>
+
+            <table>
+              <tr><th>How sure</th><th>What it means</th></tr>
+              <tr><td>Certain</td>
+                  <td>The file carries the MusicBrainz recording id the listing names.
+                      Not a resemblance - the same recording, identified.</td></tr>
+              <tr><td>Likely</td>
+                  <td>The title matches and the length is what the listing says it
+                      should be.</td></tr>
+              <tr><td>Doubtful</td>
+                  <td>The title matches and the length does not. This is the remix, the
+                      live take, the radio edit. Shown so you can see it; never filled
+                      in on its own.</td></tr>
+            </table>
+
+            <p>Two guards matter more than the confidence:</p>
+
+            <p><strong>It only considers files by the same artist.</strong> Without that
+            check, Citizen King's missing <em>Blue Monday</em> matches Orgy's cover of
+            it - same title, and the durations are close enough to look like agreement.
+            One album would quietly acquire another band's recording.</p>
+
+            <p><strong>An album has to be mostly present before its holes count as
+            holes.</strong> If half the listing is missing, that is not an album with
+            gaps in it - that is a record nobody ripped, and offering to assemble it out
+            of soundtrack appearances would build something that never existed.</p>
+
+            <p>Where two different recordings of the song are both on disk, it stops and
+            asks rather than choosing. Two candidates is exactly the case where a guess
+            is worth least.</p>
+
+            <h2 id="tags">Tag problems</h2>
+
+            <p>The <strong>Tag problems</strong> button reports two different things, and
+            the difference matters more than the total.</p>
+
+            <h3>Wrong on its own terms</h3>
+
+            <p>A file that is wrong however you look at it: a stray URL in the title, a
+            track number repeated into the title, "Unknown Artist", doubled spaces,
+            SHOUTING. Some of these fix themselves - the answer is still in the file, and
+            the repair is exact. Others do not: "Unknown Artist" is certainly wrong and
+            nothing in the file knows who it is.</p>
+
+            <p>Tick <strong>Fix tags inside the files</strong> before Apply to write the
+            ones that fix themselves. It is off by default, because moving a file is
+            undone by moving it back and rewriting one is a bigger promise. Every write
+            goes through History like everything else.</p>
+
+            <h3>Wrong only in company</h3>
+
+            <p>Nothing is the matter with <em>Harry Potter and the Philosopher's Stone
+            (Full-Cast Edition) (Unabridged)</em> read on its own. It is only wrong beside
+            its six siblings, none of which say "(Unabridged)" - and the result is one book
+            filed away from the rest of the series where nobody looks for it.</p>
+
+            <p>These open a separate list, one row at a time, and
+            <strong>every row starts unticked</strong>. That is deliberate. The suggestion
+            is whatever most of the set says, and the majority is not always right: in one
+            real library thirteen files spell a band "Cherry Poppin Daddies" and one spells
+            it "Cherry Poppin' Daddies". The one is correct.</p>
+
+            {{IMG_CONSISTENCY}}
+
+            <p>Read the rows. Tick the ones you agree with.</p>
+
+            <h3>Identify by ear</h3>
+
+            <p>For files whose tags say nothing usable at all, the audio can be sent to
+            AcoustID and the answer looked up in MusicBrainz. This is the one feature here
+            that talks to anybody else about your library, so it is worth being exact about
+            what leaves the machine: <strong>an acoustic fingerprint and a duration</strong>.
+            Not the audio, not the filename, not the path. No audio can be reconstructed
+            from a fingerprint.</p>
+
+            <p>It needs a free AcoustID key, entered in Settings. It never writes anything -
+            it shows you what it found, including any file where what the audio says
+            disagrees with what the tags claim.</p>
+
+            <h2 id="books">Audiobooks</h2>
+
+            <p>A book read into a music library becomes an album by an artist nobody has
+            heard of with fifty-seven tracks called "Chapter 1" through "Chapter 57", and
+            every rule meant for music then does the wrong thing to it. So books are
+            recognised and kept apart.</p>
+
+            <p>An <code>.m4b</code> is a book outright - the format exists so players
+            remember your place, and nobody ships an album as one. Several in a folder are
+            several books, not one book in pieces. Otherwise it looks for chapter
+            numbering, a spoken-word genre, long tracks and words like "unabridged".</p>
+
+            <p>The bar is deliberately high. A film score with movements called
+            "Chaconne: Part 1", a cast recording on "Disc 1", and a single whose files are
+            named "Track 01" are all <em>not</em> books, and were all wrongly called books
+            by an earlier version.</p>
+
+            <p>Books file by author and chapter, not album and track, because a book has
+            neither:</p>
+
+            <pre>{author}/{book}[ ({year})]/{chapter:000} {chaptertitle}</pre>
+
+            <p>A book's own tags cannot be trusted for this - one ripped from CDs carries
+            the disc as the album and the publisher as the artist - so the author and title
+            come from what the whole folder says.</p>
+
+            <h2 id="tidy">Cleaning up, and quarantine</h2>
+
+            <p><strong>Nothing is ever deleted.</strong> Redundant copies and anything the
+            clean-up removes are moved to a folder called
+            <code>PyreMedia Quarantine</code>, beside your library rather than inside it so
+            a later scan does not pick them straight back up. Enough of each file's old path
+            is kept that two albums' "01 Intro.mp3" stay apart.</p>
+
+            <p>All of it undoes from History.</p>
+
+            <p><strong>Clean up</strong> takes out everything that is not music: artwork,
+            scraped metadata, playlists, system leftovers, ripping logs. On one library that
+            was 9,609 files and 2.7 GB.</p>
+
+            <div class="warn">
+            <p><strong>It will refuse if the tags have not been written yet.</strong> The
+            scraped <code>.nfo</code> files it removes hold the only copy of some of your
+            library's information - years, MusicBrainz identifiers, exact track lengths.
+            Deleting them before that is written into the audio loses it silently, so the
+            program will not do it in that order. Running clean-up from Apply handles this
+            for you.</p>
+            </div>
+
+            <p>Afterwards it offers to remove folders left holding nothing. That one is not
+            undoable from History, and the dialog says so - an empty folder has no contents
+            to restore.</p>
+
+            <h3>Evening out the volume</h3>
+
+            <p>A library ripped across thirty years plays at wildly different levels.
+            <strong>Even out the volume (ReplayGain)</strong> measures each track and writes
+            the figure into its tags; the player does the rest. The audio is never
+            re-encoded and deleting the tags undoes it completely.</p>
+
+            <p>It is off by default, and slow - every file has to be decoded once to be
+            measured. Albums are measured as albums, so a deliberately quiet track stays
+            quiet relative to its record rather than being levelled to match everything
+            else.</p>
+
             <h2 id="nfo">.nfo files and Kodi</h2>
 
             <p>An <code>.nfo</code> beside a video is how Kodi stores what it knows
             about it. PyreMedia reads them, writes them, and keeps them attached to
             their file through a rename.</p>
+
+            <p>Television gets two kinds. Each episode has its own beside the file, and
+            the show has one <code>tvshow.nfo</code> in the show folder, above the
+            season folders. Both matter: without the show one, Kodi has nothing to
+            attach the series artwork, plot, studio or rating to, and identifies the
+            series by scraping the folder name instead - so a folder it reads
+            differently becomes a second, half-empty series sitting beside the real
+            one.</p>
 
             <ul>
               <li>An existing <code>.nfo</code> is read first when identifying a file.
@@ -570,6 +891,11 @@ internal static class Manual
 
             {{IMG_SETTINGS}}
 
+            <p>Settings is grouped into tabs, by what you are trying to do rather
+            than by which part of the program reads the value - the libraries sit
+            beside the folders they receive from, and the external tools have a
+            tab of their own.</p>
+
             <p>The parts worth knowing about:</p>
 
             <table>
@@ -591,6 +917,25 @@ internal static class Manual
               <tr><td>Send deletions to the Recycle Bin</td>
                   <td>On by default. A caution appears if any of your folders sit on a
                       drive where Windows won't honour it.</td></tr>
+              <tr><td>Libraries</td>
+                  <td>Where <em>Move completed</em> sends finished files. Four separate
+                      folders, because they are not interchangeable - Kodi scans films
+                      and television separately, and a book filed among the albums is a
+                      book nobody finds again. Blank is fine; the button asks when it
+                      needs one.</td></tr>
+              <tr><td>Music naming</td>
+                  <td>The same box as on the Audio tab, and the same setting - changing
+                      it in either place changes it in both.</td></tr>
+              <tr><td>AcoustID key</td>
+                  <td>Only needed to identify music whose tags say nothing at all. Free,
+                      and the only key here used to ask about your own files. Clearing
+                      the box turns the feature off.</td></tr>
+              <tr><td>Give each film its own folder</td>
+                  <td>Off by default, and a real fork in the road: on, every film becomes
+                      <em>Arrival (2016)/Arrival (2016).mkv</em>, which is what Kodi and
+                      Plex expect and where a poster and subtitles have somewhere to
+                      live. Off, films sit loose in one folder. Changing it later moves
+                      every film you have.</td></tr>
               <tr><td>Archive originals</td>
                   <td>Where pre-remux originals are kept. Beside the file is instant;
                       another drive means copying every byte.</td></tr>
@@ -647,6 +992,31 @@ internal static class Manual
             <p>Nothing is ticked, or every row is Already correct or Problem. A Problem
             row says what the problem is.</p>
 
+            <h3>It renamed the episodes but made no Season folders</h3>
+            <p>That is <em>Move episodes into season folders</em>, in Settings under
+            Video. It is on by default, so if you are seeing this it has been turned
+            off - with it off the files are renamed exactly where they sit, which on a
+            show folder full of loose episodes gives perfect filenames and no
+            <code>Season 01</code> beneath them.</p>
+
+            <p>It was off by default once, on the reasoning that renaming inside a
+            folder and rearranging a library are different sizes of promise. The result
+            was a scan that looked like it had half worked, and was reported as a fault
+            more than once. Season folders are also what Kodi, Plex and Jellyfin expect,
+            so the default that needed explaining was the one doing less.</p>
+
+            <p>Turning it on also allows the show's own folder to be renamed to the
+            canonical title.</p>
+
+            <p>One exception applies either way: an episode sitting loose in a scan root
+            is given a show folder and a season folder even with the setting off. It is
+            in no show's folder, so leaving it there preserves no arrangement - it
+            declines to make one.</p>
+
+            <p>When a scan meets a show keeping its episodes loose, it says so beside the
+            change count rather than leaving a list of moves to be puzzled over. A show
+            already in season folders is silent, so a tidy library never nags.</p>
+
             <h3>A file wouldn't rename</h3>
             <p>Almost always something else has it open - Kodi, Plex, a player, or
             Explorer's preview pane. The other files in the batch still go through, and
@@ -687,7 +1057,9 @@ internal static class Manual
             .Replace("{{IMG_HISTORY}}", Img("history", "History, with rows ticked ready to revert."))
             .Replace("{{IMG_ABOUT}}", Img("about", "About: versions, sources, dependencies and where files are kept."))
             .Replace("{{IMG_CONFLICT}}", Img("conflict", "Resolving a name that is already taken."))
-            .Replace("{{IMG_REMUX}}", Img("remux", "Remux: files grouped by the tracks they hold."));
+            .Replace("{{IMG_REMUX}}", Img("remux", "Remux: files grouped by the tracks they hold."))
+            .Replace("{{IMG_AUDIO}}", Img("audio", "The Audio tab after a scan: albums grouped, with what it proposes for each file."))
+            .Replace("{{IMG_CONSISTENCY}}", Img("consistency", "Files that disagree with the rest of their album. Every row starts unticked."));
     }
 
     private static string Escape(string s) =>

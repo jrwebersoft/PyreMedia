@@ -34,7 +34,7 @@ public partial class SettingsWindow
             FolderList.Items.Add(f);
 
         PickPreferred.Value = _settings.PreferredLanguage;
-        ChkFlagForeign.IsChecked = _settings.FlagForeignAudio;
+        ChkFlagForeign.IsChecked = _settings.ReadTrackDetails;
         PickKeepAudio.Value = _settings.KeepAudioLanguages;
         PickKeepSubs.Value = _settings.KeepSubtitleLanguages;
         ChkKeepUnd.IsChecked = _settings.KeepUndeterminedLanguage;
@@ -87,6 +87,7 @@ public partial class SettingsWindow
         ChkRename.IsChecked = _settings.RenameTvFiles;
         ChkMove.IsChecked = _settings.MoveTvFiles;
         ChkCombineSeasons.IsChecked = _settings.CombineSplitSeasons;
+        ChkScanOnLaunch.IsChecked = _settings.ScanOnLaunch;
         ChkOverwrite.IsChecked = _settings.OverwriteFiles;
         ChkAutoSelect.IsChecked = _settings.AutoSelectMatch;
 
@@ -106,7 +107,73 @@ public partial class SettingsWindow
         TxtLanguage.Text = _settings.Language;
         TxtTmdbKey.Text = _settings.TmdbApiKey;
         TxtTvdbKey.Text = _settings.TvdbApiKey;
+        TxtAcoustIdKey.Text = _settings.AcoustIdApiKey;
+
+        TxtMovieDest.Text = _settings.MovieDestination;
+        TxtTvDest.Text = _settings.TvDestination;
+        TxtMusicDest.Text = _settings.MusicDestination;
+        TxtBookDest.Text = _settings.AudiobookDestination;
+        TxtBookFormat.Text = _settings.AudiobookFormat;
+        TxtMusicFormat.Text = _settings.MusicFileFormat;
+        UpdateMusicExample();
         TxtFilters.Text = _settings.SearchTermFilters;
+    }
+
+    private void OnMusicFormatChanged(object sender, TextChangedEventArgs e) => UpdateMusicExample();
+
+    private void OnMusicPreset(object sender, RoutedEventArgs e)
+    {
+        TxtMusicFormat.Text = ((sender as FrameworkElement)?.Tag as string) switch
+        {
+            "initial" => PyreMedia.Core.Music.NamingFormat.ByInitial,
+            "artisttitle" => PyreMedia.Core.Music.NamingFormat.ArtistTitle,
+            _ => PyreMedia.Core.Music.NamingFormat.Default
+        };
+    }
+
+    /// <summary>
+    /// Show what the pattern does, and say what is wrong with it as it is
+    /// typed. A pattern is far easier to judge from one worked example than
+    /// from reading it, and a mistake named here is a mistake never applied.
+    /// </summary>
+    private void UpdateMusicExample()
+    {
+        if (TxtMusicExample is null) return;
+
+        var format = new PyreMedia.Core.Music.NamingFormat(TxtMusicFormat.Text);
+        var problems = format.Problems();
+
+        TxtMusicProblem.Text = string.Join("; ", problems);
+        TxtMusicProblem.Visibility = problems.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+        try { TxtMusicExample.Text = problems.Count == 0 ? format.Example() : ""; }
+        catch { TxtMusicExample.Text = ""; }
+    }
+
+    /// <summary>
+    /// Choose a library folder. The box stays editable by hand as well - a
+    /// path on a drive that is not plugged in cannot be browsed to, and typing
+    /// it is the only way to set one up before the disk arrives.
+    /// </summary>
+    private void OnPickLibrary(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string which }) return;
+
+        var box = which switch
+        {
+            "movie" => TxtMovieDest,
+            "tv" => TxtTvDest,
+            "music" => TxtMusicDest,
+            _ => TxtBookDest
+        };
+
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = $"Where your {which} library lives",
+            InitialDirectory = System.IO.Directory.Exists(box.Text) ? box.Text : ""
+        };
+
+        if (dialog.ShowDialog() == true) box.Text = dialog.FolderName;
     }
 
     /// <summary>Show the user what their format actually produces.</summary>
@@ -169,7 +236,7 @@ public partial class SettingsWindow
         if (PickPreferred.Value is { Length: > 0 } lang)
             _settings.PreferredLanguage = lang;
 
-        _settings.FlagForeignAudio = ChkFlagForeign.IsChecked == true;
+        _settings.ReadTrackDetails = ChkFlagForeign.IsChecked == true;
         _settings.KeepAudioLanguages = PickKeepAudio.Value;
         _settings.KeepSubtitleLanguages = PickKeepSubs.Value;
         _settings.KeepUndeterminedLanguage = ChkKeepUnd.IsChecked == true;
@@ -232,6 +299,7 @@ public partial class SettingsWindow
         _settings.RenameTvFiles = ChkRename.IsChecked == true;
         _settings.MoveTvFiles = ChkMove.IsChecked == true;
         _settings.CombineSplitSeasons = ChkCombineSeasons.IsChecked == true;
+        _settings.ScanOnLaunch = ChkScanOnLaunch.IsChecked == true;
         _settings.OverwriteFiles = ChkOverwrite.IsChecked == true;
         _settings.AutoSelectMatch = ChkAutoSelect.IsChecked == true;
 
@@ -260,6 +328,27 @@ public partial class SettingsWindow
 
         if (!string.IsNullOrWhiteSpace(TxtTvdbKey.Text))
             _settings.TvdbApiKey = TxtTvdbKey.Text.Trim();
+
+        // Saved even when emptied, unlike the two above. Those are guarded so a
+        // blank box cannot wipe a working key by accident - but this is the one
+        // key that sends anything about the user's own files anywhere, and
+        // clearing the box is how somebody turns that off. A setting you cannot
+        // withdraw is not really optional.
+        _settings.AcoustIdApiKey = TxtAcoustIdKey.Text.Trim();
+
+        // Saved as typed, blanks included. A library folder somebody has
+        // emptied is one they want the button to ask about again, and refusing
+        // to clear it would strand a destination on a drive that has gone.
+        _settings.MovieDestination = TxtMovieDest.Text.Trim();
+        _settings.TvDestination = TxtTvDest.Text.Trim();
+        _settings.MusicDestination = TxtMusicDest.Text.Trim();
+        _settings.AudiobookDestination = TxtBookDest.Text.Trim();
+
+        if (!string.IsNullOrWhiteSpace(TxtBookFormat.Text))
+            _settings.AudiobookFormat = TxtBookFormat.Text.Trim();
+
+        if (!string.IsNullOrWhiteSpace(TxtMusicFormat.Text))
+            _settings.MusicFileFormat = TxtMusicFormat.Text.Trim();
 
         // Checked here rather than silently ignored at scan time. A pattern that
         // won't compile, or one that backtracks its way past a timeout, otherwise

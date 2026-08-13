@@ -341,8 +341,12 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
             var s = keptSubs[i];
             var chosen = plan.DefaultSubtitleIndex is { } wantSub && s.Index == wantSub;
 
+            // The plan's answer, not the file's - the flag can be wrong in the
+            // source and is editable before a remux.
+            var forced = plan.IsForced(s);
+
             args.Add($"-disposition:s:{i}");
-            args.Add(s.IsForced ? "default+forced" : chosen ? "default" : "0");
+            args.Add(forced ? "default+forced" : chosen ? "default" : "0");
         }
 
         args.Add(temp);
@@ -521,37 +525,16 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
         // video - dropping them legitimately shortens it. A real 24-minute
         // episode failed this check over 2.9s while being perfectly intact.
         // Truncation is measured in minutes, so 1% still catches it easily.
-        if (plan.Info.DurationSeconds > 0 && info.DurationSeconds > 0)
-        {
-            var drift = Math.Abs(plan.Info.DurationSeconds - info.DurationSeconds);
-            var allowed = Math.Max(3.0, plan.Info.DurationSeconds * 0.01);
+        if (DurationCheck.Failed(plan.Info, info, plan.Keep) is { } truncated) return truncated;
 
-            if (drift > allowed)
-                return $"duration changed by {drift:F1}s (expected {plan.Info.DurationSeconds:F0}s, got {info.DurationSeconds:F0}s)";
-        }
-
-        if (new FileInfo(temp).Length < 1024)
-            return "output is suspiciously small";
+        if (OutputCheck.TooSmall(temp, plan.Info, plan.HasMvc) is { } small) return small;
 
         // Dolby Vision is the quiet failure: the picture still plays, in HDR10,
         // and nothing looks broken until you notice DV never engages. The RPU
         // lives in the bitstream and survives -c copy, but the container-level
         // configuration record is what a player looks for, and a muxer that
         // doesn't carry it across drops DV without a word.
-        var sourceDv = plan.Info.Video.FirstOrDefault(v => v.IsDolbyVision);
-        if (sourceDv is not null)
-        {
-            var outDv = info.Video.FirstOrDefault(v => v.IsDolbyVision);
-
-            if (outDv is null)
-                return $"Dolby Vision was lost ({sourceDv.DvLabel} in the original, none in the output)";
-
-            if (sourceDv.DvProfile != outDv.DvProfile)
-                return $"Dolby Vision profile changed from {sourceDv.DvProfile} to {outDv.DvProfile}";
-
-            if (sourceDv.DvHasEnhancementLayer && !outDv.DvHasEnhancementLayer)
-                return "the Dolby Vision enhancement layer was lost";
-        }
+        if (OutputCheck.DolbyVisionLost(plan.Info, info) is { } dv) return dv;
 
         return null;
     }

@@ -54,6 +54,27 @@ public partial class TrackRow : ObservableObject
         Stream.Kind is StreamKind.Audio or StreamKind.Subtitle
         || (Stream.Kind == StreamKind.Video && HasVideoChoice && !Stream.IsCoverArt);
 
+    /// <summary>
+    /// Whether this subtitle track comes out marked forced.
+    ///
+    /// Starts as whatever the file says and can be changed, because the flag is
+    /// often simply wrong and nothing reveals it until you are watching. A full
+    /// track marked forced turns permanent subtitles on for a film in your own
+    /// language; a genuine forced track left unmarked leaves the one line of
+    /// alien dialogue untranslated.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsForced { get; set; }
+
+    /// <summary>
+    /// Subtitles only. Audio can carry the flag and practically never should -
+    /// offering it per audio track invites turning a film's only soundtrack
+    /// into something a player treats as an occasional overlay.
+    /// </summary>
+    public bool CanBeForced => Stream.Kind == StreamKind.Subtitle;
+
+    partial void OnIsForcedChanged(bool value) => OnPropertyChanged(nameof(Note));
+
     /// <summary>Raised so the owning group can clear the flag from its siblings.</summary>
     public event Action<TrackRow>? DefaultRequested;
 
@@ -66,7 +87,17 @@ public partial class TrackRow : ObservableObject
     {
         get
         {
-            if (Stream.Kind == StreamKind.Subtitle && Stream.IsForced)
+            // Says what the file will end up with rather than what it arrived
+            // with, so a flag you have just changed does not keep describing
+            // the old answer.
+            if (Stream.Kind == StreamKind.Subtitle && IsForced != Stream.IsForced)
+            {
+                return IsForced
+                    ? "will be marked forced"
+                    : "forced flag will be removed";
+            }
+
+            if (Stream.Kind == StreamKind.Subtitle && IsForced)
             {
                 return Stream.Language == Preferred || Stream.Language == "und"
                     ? "forced - usually needed"
@@ -582,7 +613,8 @@ public partial class RemuxWindow
                           Preferred = _settings.PreferredLanguage.Trim().ToLowerInvariant(),
                           IsBestAudio = best is not null && s.Index == best.Index,
                           HasVideoChoice = realVideo > 1,
-                          IsDefault = s.IsDefault
+                          IsDefault = s.IsDefault,
+                          IsForced = s.IsForced
                       }));
 
             // Seed a default audio track if the file didn't declare one, and keep
@@ -783,6 +815,9 @@ public partial class RemuxWindow
                         .FirstOrDefault(t => t.IsDefault && t.Stream.Kind == StreamKind.Audio)?.Stream.Index,
                     DefaultSubtitleIndex = row.Tracks
                         .FirstOrDefault(t => t.IsDefault && t.Stream.Kind == StreamKind.Subtitle)?.Stream.Index,
+                    ForcedSubtitles = [.. row.Tracks
+                        .Where(t => t.IsForced && t.Stream.Kind == StreamKind.Subtitle)
+                        .Select(t => t.Stream.Index)],
                     DefaultVideoIndex = row.Tracks
                         .FirstOrDefault(t => t.IsDefault && t.Stream.Kind == StreamKind.Video
                                              && !t.Stream.IsCoverArt)?.Stream.Index

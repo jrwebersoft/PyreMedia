@@ -1,9 +1,10 @@
 # PyreMedia
 
-A Windows media library organiser. It renames and files TV and film, repairs the
-metadata around them, and strips audio and subtitle tracks you don't want —
-without ever writing to disk until you have seen the change listed and approved
-it, and without ever making a change you cannot undo.
+A Windows media library organiser. It renames and files TV, film, music and
+audiobooks, repairs the metadata around them, and strips audio and subtitle
+tracks you don't want — without ever writing to disk until you have seen the
+change listed and approved it, and without ever making a change you cannot
+undo.
 
 Windows · .NET 10 · WPF
 
@@ -11,14 +12,25 @@ Windows · .NET 10 · WPF
 
 ## Why this exists
 
-Media libraries rot. Files arrive named by whoever packaged them, a season
-arrives as eight separate folders, metadata sidecars go stale, and remuxes
-quietly drop the Dolby Vision layer that made the file worth keeping. Most tools
-that fix this either do it silently — you find out what happened afterwards — or
-demand the library already be tidy before they will help.
+If you have ripped your own discs, you know what the shelf looks like
+afterwards. MakeMKV hands you `title_t00.mkv` and leaves the naming to you. A
+boxset rips one folder per disc, so a four-season set becomes twelve folders
+that know nothing about seasons. A UHD disc brings a dozen dubs and thirty
+subtitle tracks, several gigabytes of them, for a film you will only ever watch
+in one language. CDs ripped across twenty years carry whatever tags whichever
+program was installed at the time felt like writing, and half of them disagree
+about the album.
+
+None of that is a mistake you made. It is what ripping produces, and it has to
+be tidied up afterwards before Kodi or Plex will recognise any of it.
+
+The tools that tidy it up tend to do one of two things: work silently, so you
+find out what happened when something is missing, or insist the library is
+already in order before they will help — which is the problem.
 
 PyreMedia is built the other way round: **it shows you every change before it
-makes one, and records every change it makes so you can take it back.**
+makes one, and records every change it makes so you can take it back.** These
+are your discs and your rips; nothing here treats them as disposable.
 
 ## What it does
 
@@ -37,9 +49,10 @@ silently dropping a field. Files can be renamed where they sit, or gathered into
 
 ### Recognises a show split across folders
 
-A season per folder is how most TV arrives. Eight folders of the same series are
-recognised as **one entry**, matched once, and gathered into a single show
-folder — instead of being matched eight times by hand.
+A boxset rips one folder per disc, so a series arrives as eight or twelve
+folders that know nothing about each other. They are recognised as **one
+entry**, matched once, and gathered into a single show folder — instead of being
+matched a dozen times by hand.
 
 It refuses to guess where guessing is expensive. Differing years separate two
 series sharing a name; a season number appearing twice stops the merge and says
@@ -77,6 +90,34 @@ Writes Kodi-format `.nfo` sidecars and artwork, from TMDb and TheTVDB.
 - Poster, fanart and clear logo can be chosen from what the providers offer,
   with a picker rather than a lucky dip. Clear logos are enforced as transparent
   PNG, since that is the only thing Kodi can use.
+
+### Organises music and audiobooks
+
+The same idea applied to an audio library: read what is there, show what it
+proposes, change nothing until you say so.
+
+- **Files by a pattern you set** — `{albumartist}/{album} ({year})/{track} {title}`
+  by default, with optional sections that vanish when a field is empty, so one
+  pattern serves a library where some albums have a year and some do not.
+- **Tells a duplicate from a different version.** Two files claiming track 4 are
+  the same recording, the same song in two versions, or two different songs
+  numbered wrongly — and only the first is a duplicate. Where titles and lengths
+  disagree it compares the audio itself, using an acoustic fingerprint that needs
+  no account and no network. Measured on a real library of seventeen thousand
+  files, titles and durations alone were right 95.2% of the time; the fingerprint
+  settled the rest, including a pair that would otherwise have had one deleted as
+  a copy of something it was not.
+- **Finds tag problems worth fixing** — a URL left in a title, a track number
+  repeated into it, "Unknown Artist" — and separates them from the ones that are
+  only wrong in company, like the one book in a series whose title says
+  "(Unabridged)" when its six siblings do not. Those open a list where every row
+  starts unticked, because the majority is not always right.
+- **Audiobooks are handled as books**, not as albums: chapters kept in order,
+  filed under author and title rather than scattered by track number.
+- **ReplayGain** can even out volume across a library ripped over thirty years.
+  Off by default, tag-only — the audio is never re-encoded.
+- Redundant copies are moved to a quarantine folder beside the library, never
+  deleted, and all of it undoes from History.
 
 ### Undo
 
@@ -159,8 +200,8 @@ The manual, with screenshots, is generated from the running application:
 
 ## Status
 
-Version 1.0.0. TV and film are complete and in daily use. Music library
-support is being built and is not in this release.
+Version 1.0.0 — the first public release, and it contains everything: TV, film,
+music and audiobooks.
 
 Some things are proven further than others. Renaming, conflict handling and
 undo are exercised daily on a large library; remuxing is used regularly but on

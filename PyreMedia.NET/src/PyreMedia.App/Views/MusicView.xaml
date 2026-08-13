@@ -1,0 +1,213 @@
+<UserControl x:Class="PyreMedia.App.Views.MusicView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="0" Padding="16,2,16,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <ui:Button Icon="{ui:SymbolIcon FolderAdd24}" Content="Add folder"
+                               Click="OnAddFolder" Appearance="Secondary" Margin="0,0,8,0" />
+                    <ui:Button x:Name="BtnScan" Icon="{ui:SymbolIcon ArrowSync24}" Content="Scan"
+                               Click="OnScan" Appearance="Primary" Margin="0,0,8,0" />
+                    <ui:Button x:Name="BtnCancel" Icon="{ui:SymbolIcon Dismiss24}" Content="Stop"
+                               Click="OnCancel" Appearance="Secondary" Visibility="Collapsed" />
+                </StackPanel>
+
+                <!-- Two lines: what it is doing, and how far through. The bar
+                     only appears once there is something for it to measure. -->
+                <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="TxtStatus" TextTrimming="CharacterEllipsis" Opacity="0.85" />
+
+                    <Grid x:Name="ProgressRow" Visibility="Collapsed" Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ProgressBar x:Name="Bar" Height="4" VerticalAlignment="Center"
+                                     Minimum="0" Maximum="1" />
+
+                        <TextBlock Grid.Column="1" x:Name="TxtEta" Margin="10,0,0,0"
+                                   FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <ui:Button x:Name="BtnHealth" Icon="{ui:SymbolIcon Stethoscope24}"
+                               Content="Tag problems" Click="OnShowHealth"
+                               Appearance="Secondary" Margin="0,0,8,0" IsEnabled="False" />
+                    <ui:Button x:Name="BtnIdentify" Icon="{ui:SymbolIcon MusicNote2Play20}"
+                               Content="Identify by ear" Click="OnIdentify"
+                               ToolTip="For files whose tags say nothing useful: works out what they are from the audio itself, via AcoustID and MusicBrainz. Needs an AcoustID key and a network."
+                               Appearance="Secondary" Margin="0,0,8,0" IsEnabled="False" />
+                    <ui:Button x:Name="BtnSweep" Icon="{ui:SymbolIcon Broom24}"
+                               Content="Clean up" Click="OnSweep"
+                               Appearance="Secondary" Margin="0,0,8,0" IsEnabled="False" />
+                    <ui:Button x:Name="BtnMove" Icon="{ui:SymbolIcon FolderArrowRight24}"
+                               Content="Move completed" Click="OnMoveCompleted"
+                               Appearance="Secondary" Margin="0,0,8,0" IsEnabled="False" />
+                    <ui:Button x:Name="BtnApply" Icon="{ui:SymbolIcon Checkmark24}" Content="Apply"
+                               Click="OnApply" Appearance="Primary" IsEnabled="False" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Folders being watched -->
+        <ui:Card Grid.Row="1" Margin="16,0,16,10" Padding="12">
+            <StackPanel>
+                <TextBlock Text="Music folders" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <ItemsControl x:Name="ListFolders">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" FontSize="12" />
+                                <ui:Button Grid.Column="1" Icon="{ui:SymbolIcon Delete24}"
+                                           Appearance="Transparent" Padding="6,2"
+                                           Click="OnRemoveFolder" Tag="{Binding}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="TxtNoFolders" Opacity="0.6" FontSize="12"
+                           Text="None yet - add the folder your music lives in." />
+            </StackPanel>
+        </ui:Card>
+
+        <!-- How files get named -->
+        <ui:Card Grid.Row="2" Margin="16,0,16,10" Padding="14">
+            <StackPanel>
+                <TextBlock Text="Where files go" FontWeight="SemiBold" Margin="0,0,0,2" />
+                <TextBlock Opacity="0.7" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="Fields in braces. Square brackets are optional - the whole section disappears when a field inside it is empty, so one pattern works whether an album has a year or not." />
+
+                <ui:TextBox x:Name="TxtPattern" TextChanged="OnPatternChanged"
+                            PlaceholderText="{}{albumartist}/{album}[ ({year})]/{track:00} {title}"
+                            FontFamily="Consolas" Margin="0,0,0,6" />
+
+                <TextBlock x:Name="TxtPreview" FontFamily="Consolas" FontSize="12"
+                           Opacity="0.75" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="TxtPatternProblem" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+
+                <WrapPanel Margin="0,10,0,0">
+                    <ui:Button Content="Artist / Album" Appearance="Secondary" Padding="10,3"
+                               Margin="0,0,8,0" Click="OnPreset" Tag="default" />
+                    <ui:Button Content="Under a letter" Appearance="Secondary" Padding="10,3"
+                               Margin="0,0,8,0" Click="OnPreset" Tag="initial" />
+                    <ui:Button Content="Artist - Title" Appearance="Secondary" Padding="10,3"
+                               Margin="0,0,16,0" Click="OnPreset" Tag="artisttitle" />
+
+                    <CheckBox x:Name="ChkFingerprint" Content="Compare the audio when in doubt"
+                              Margin="0,0,16,0" VerticalAlignment="Center" />
+                    <CheckBox x:Name="ChkWriteTags" Content="Fix tags inside the files"
+                              Margin="0,0,16,0" VerticalAlignment="Center" />
+                    <CheckBox x:Name="ChkReplayGain" Content="Even out the volume (ReplayGain)"
+                              ToolTip="Measures how loud each file is and writes that as a tag. The audio is never re-encoded and deleting the tags undoes it - but every file has to be decoded once, which is slow."
+                              VerticalAlignment="Center" />
+                </WrapPanel>
+            </StackPanel>
+        </ui:Card>
+
+        <!-- The plan -->
+        <ui:Card Grid.Row="3" Margin="16,0,16,10" Padding="0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Padding="12,8" CornerRadius="6"
+                        Background="{DynamicResource ControlFillColorDefaultBrush}">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="FilterAll" Content="Everything" GroupName="MusicFilter"
+                                     IsChecked="True" Padding="12,4" Checked="OnFilterChanged" />
+                        <RadioButton x:Name="FilterMoves" Content="Moving" GroupName="MusicFilter"
+                                     Padding="12,4" Checked="OnFilterChanged" />
+                        <RadioButton x:Name="FilterDupes" Content="Duplicates" GroupName="MusicFilter"
+                                     Padding="12,4" Checked="OnFilterChanged" />
+                        <RadioButton x:Name="FilterHeld" Content="Needs you" GroupName="MusicFilter"
+                                     Padding="12,4" Checked="OnFilterChanged" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Grouped by album, the way the TV side groups by show and
+                     season. Seventeen thousand flat rows is a list nobody can
+                     find anything in; virtualisation stays on so the grouping
+                     costs nothing at that size. -->
+                <DataGrid Grid.Row="1" x:Name="GridPlan" AutoGenerateColumns="False"
+                          IsReadOnly="True" HeadersVisibility="Column"
+                          GridLinesVisibility="None" Background="Transparent"
+                          RowHeight="30" BorderThickness="0"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                          ScrollViewer.CanContentScroll="True">
+
+                    <DataGrid.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.ContainerStyle>
+                                <Style TargetType="{x:Type GroupItem}">
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="{x:Type GroupItem}">
+                                                <Expander IsExpanded="False" Margin="0,2,0,0"
+                                                          Background="{DynamicResource ControlFillColorDefaultBrush}">
+                                                    <Expander.Header>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding Name}"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Margin="10,0,0,0" FontSize="11"
+                                                                       VerticalAlignment="Center" Opacity="0.7">
+                                                                <Run Text="{Binding ItemCount, Mode=OneWay}" />
+                                                                <Run Text="files" />
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                    </Expander.Header>
+                                                    <ItemsPresenter />
+                                                </Expander>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </GroupStyle.ContainerStyle>
+                        </GroupStyle>
+                    </DataGrid.GroupStyle>
+
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="What" Binding="{Binding KindLabel}" Width="110" MinWidth="90" />
+                        <DataGridTextColumn Header="File" Binding="{Binding SourceName}" Width="2*" MinWidth="180" />
+                        <DataGridTextColumn Header="Goes to" Binding="{Binding TargetLabel}" Width="3*" MinWidth="220" />
+                        <DataGridTextColumn Header="Why" Binding="{Binding Note}" Width="2*" MinWidth="160" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </ui:Card>
+
+        <Expander Grid.Row="4" Header="Log" Margin="16,0,16,12" IsExpanded="False">
+            <TextBox x:Name="TxtLog" IsReadOnly="True" MaxHeight="180" FontFamily="Consolas"
+                     FontSize="11" VerticalScrollBarVisibility="Auto" BorderThickness="0"
+                     Background="Transparent" TextWrapping="NoWrap" />
+        </Expander>
+    </Grid>
+</UserControl>

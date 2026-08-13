@@ -29,6 +29,14 @@ public sealed class FileConflict
     /// <summary>Companions that must move with the source and share its fate.</summary>
     public List<string> Companions { get; init; } = [];
 
+    /// <summary>
+    /// Why these two are in each other's way, in words. "A file of this name is
+    /// already there" and "another file in this run wants the same name" need
+    /// opposite answers, and a dialog that shows two paths without saying which
+    /// case it is makes the user work that out for themselves.
+    /// </summary>
+    public string? Reason { get; init; }
+
     public ConflictResolution Resolution { get; set; } = ConflictResolution.Ask;
 
     /// <summary>The name this would take under KeepBoth, filled in when resolved.</summary>

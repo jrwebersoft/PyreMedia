@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:vm="clr-namespace:PyreMedia.App.ViewModels"
+        xmlns:views="clr-namespace:PyreMedia.App.Views"
         mc:Ignorable="d"
         Title="PyreMedia"
         Icon="pyremedia.ico"
@@ -18,10 +19,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <ui:TitleBar Grid.Row="0" Title="PyreMedia" ShowMaximize="True">
@@ -30,8 +28,25 @@
             </ui:TitleBar.Icon>
         </ui:TitleBar>
 
+        <!-- Video and audio are different jobs on different files, so they are
+             different tabs rather than one list filtered two ways. Inside each,
+             the filter narrows: all video / tv / movies, all audio / music /
+             audiobooks. -->
+        <TabControl Grid.Row="1" x:Name="Tabs" Margin="8,0,8,0" BorderThickness="0"
+                    Background="Transparent">
+
+            <TabItem Header="Video">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
         <!-- Toolbar: mode switch + actions + live status -->
-        <Border Grid.Row="1" Padding="16,2,16,10">
+        <Border Grid.Row="0" Padding="16,2,16,10">
             <Grid x:Name="ToolbarGrid">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -48,7 +63,7 @@
                 <Border Grid.Column="0" CornerRadius="6" Margin="0,0,14,0" Padding="3"
                         Background="{DynamicResource ControlFillColorDefaultBrush}">
                     <StackPanel Orientation="Horizontal">
-                        <RadioButton Content="All" GroupName="Filter" Padding="12,4"
+                        <RadioButton Content="All video" GroupName="Filter" Padding="12,4"
                                      IsChecked="{Binding FilterAll, Mode=OneWay}"
                                      Command="{Binding SetFilterCommand}" CommandParameter="all"
                                      Style="{StaticResource ModeToggle}" />
@@ -67,7 +82,9 @@
                     <ui:Button Icon="{ui:SymbolIcon FolderAdd24}" Content="Add folder"
                                Click="OnAddFolder" Appearance="Secondary" Margin="0,0,8,0" />
                     <ui:Button Icon="{ui:SymbolIcon ArrowSync24}" Content="Scan"
-                               Command="{Binding ScanCommand}" Appearance="Primary" />
+                               Command="{Binding ScanCommand}" Appearance="Primary" Margin="0,0,8,0" />
+                    <ui:Button Icon="{ui:SymbolIcon FolderArrowRight24}" Content="Move completed"
+                               Click="OnMoveCompletedVideo" Appearance="Secondary" />
 
                     <!-- Only there when there is something to clear, so it never
                          reads as an invitation to delete something. -->
@@ -225,6 +242,18 @@
                                                     ToolTip="Contains audio in another language - use Remux to strip it">
                                                 <TextBlock Text="{Binding ForeignBadge}" FontSize="10" FontWeight="SemiBold"
                                                            Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                                            </Border>
+
+                                            <!-- What the file carries. Shown only when there is
+                                                 something to say: one audio track and no subtitles
+                                                 is ordinary, and printing it on every row would
+                                                 bury the files worth looking at. -->
+                                            <Border CornerRadius="3" Padding="5,1" Margin="6,0,0,0"
+                                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                                    Visibility="{Binding HasTrackBadge, Converter={StaticResource BoolToVis}}"
+                                                    ToolTip="{Binding TrackTooltip}">
+                                                <TextBlock Text="{Binding TrackBadge}" FontSize="10"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                             </Border>
                                         </StackPanel>
                                     </StackPanel>
@@ -415,6 +444,21 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <!-- What this item carries, said next to the thing that
+                                 acts on it and pointing at it. The badge on the row
+                                 is for scanning the library; it is narrow, gets
+                                 clipped mid-word, and sits nowhere near a button.
+                                 Here there is room to spell the languages out. -->
+                            <TextBlock Text="{Binding SelectedItem.TrackCallout}"
+                                       VerticalAlignment="Center" FontSize="11" Margin="0,0,6,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       ToolTip="{Binding SelectedItem.TrackTooltip}"
+                                       Visibility="{Binding SelectedItem.HasTrackCallout, Converter={StaticResource BoolToVis}}" />
+                            <ui:SymbolIcon Symbol="ArrowRight24" FontSize="14"
+                                           VerticalAlignment="Center" Margin="0,0,6,0"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Visibility="{Binding SelectedItem.HasTrackCallout, Converter={StaticResource BoolToVis}}" />
+
                             <!-- Scoped to the selected item, so a 100-episode show is one click -->
                             <ui:Button x:Name="BtnItemTracks" Content="{Binding TracksButtonText}"
                                        Icon="{ui:SymbolIcon Wand24}" Click="OnOpenRemuxForItem"
@@ -577,7 +621,7 @@
             </Grid>
         </ScrollViewer>
 
-        <Expander Grid.Row="4" Header="Log" Margin="16,10,16,12" IsExpanded="False">
+        <Expander Grid.Row="4" Header="Log" Margin="16,10,16,4" IsExpanded="False">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
@@ -595,5 +639,36 @@
                 </StackPanel>
             </Grid>
         </Expander>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Audio">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Same shape as the video filter above it: the widest
+                         option first, then the two kinds it splits into. -->
+                    <Border Grid.Row="0" Padding="16,8,16,4" HorizontalAlignment="Left">
+                        <Border CornerRadius="6" Padding="3"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="AudioAll" Checked="OnAudioFilter" Tag="all" Content="All audio" GroupName="AudioFilter"
+                                             IsChecked="True" Padding="12,4"
+                                             Style="{StaticResource ModeToggle}" />
+                                <RadioButton x:Name="AudioMusic" Checked="OnAudioFilter" Tag="music" Content="Music" GroupName="AudioFilter"
+                                             Padding="12,4" Style="{StaticResource ModeToggle}" />
+                                <RadioButton x:Name="AudioBooks" Checked="OnAudioFilter" Tag="books" Content="Audiobooks" GroupName="AudioFilter"
+                                             Padding="12,4" Style="{StaticResource ModeToggle}" />
+                            </StackPanel>
+                        </Border>
+                    </Border>
+
+                    <views:MusicView Grid.Row="1" x:Name="MusicPane" />
+                </Grid>
+            </TabItem>
+        </TabControl>
     </Grid>
 </ui:FluentWindow>

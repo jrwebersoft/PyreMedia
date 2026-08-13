@@ -5,6 +5,7 @@ using PyreMedia.App.Views;
 using PyreMedia.Core;
 using PyreMedia.Core.History;
 using PyreMedia.Core.Models;
+using PyreMedia.Core.Music;
 using PyreMedia.Core.Organizing;
 
 namespace ManualBuilder;
@@ -67,12 +68,12 @@ internal static class Program
         var app = new PyreMedia.App.App();
         app.InitializeComponent();
 
-        // Every window here is opened, photographed and closed, so between any
-        // two captures there is a moment with no windows open - which is the
-        // condition WPF shuts an application down on by default. When it fires,
-        // every capture after the first fails with "the Application object is
-        // being shut down" and the manual is written with no pictures in it and
-        // no complaint. This tool decides when it is finished.
+        // Every window here is opened, photographed and closed, so between any two
+        // captures there is a moment with no windows open at all - which is the
+        // condition WPF shuts an application down on by default. It does not fire
+        // today, because that path runs from Application.Run and this tool drives
+        // the dispatcher itself, but the tool's lifetime should not rest on that.
+        // It decides when it is finished.
         app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         // App.OnStartup does this, but that only runs under Application.Run, and
@@ -89,8 +90,9 @@ internal static class Program
             try
             {
                 var library = BuildLibrary();
-                var settings = PrepareSettings(library);
-                var shots = CaptureAll(settings, library);
+                var music = BuildMusicLibrary();
+                var settings = PrepareSettings(library, music);
+                var shots = CaptureAll(settings, library, music);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
                 File.WriteAllText(outPath, Manual.Build(shots), new System.Text.UTF8Encoding(false));
@@ -163,18 +165,125 @@ internal static class Program
         return library;
     }
 
-    private static PyreMediaSettings PrepareSettings(string library)
+    /// <summary>
+    /// A small music library that is actually playable.
+    ///
+    /// The video fixtures are empty files, which is enough because nothing reads
+    /// inside them. The music side does: it reads tags, measures durations and
+    /// listens to the audio, and an empty .mp3 has none of that - the Audio tab
+    /// photographed against one is a picture of an empty grid.
+    ///
+    /// So these are generated: three seconds of silence each, tagged with ffmpeg.
+    /// Returns null when ffmpeg cannot be found, and the audio pictures are then
+    /// skipped rather than the run failing.
+    /// </summary>
+    private static string? BuildMusicLibrary()
+    {
+        var ffmpeg = Which("ffmpeg");
+        if (ffmpeg is null) return null;
+
+        var music = Path.Combine(_work, "Music");
+
+        // Deliberately not tidy. A manual picture of a library that is already
+        // in order shows nothing of what the screen is for, so this carries one
+        // of each thing the scan reports: a duplicate, a title with a spam URL
+        // in it, and one file that spells its album differently from its five
+        // siblings.
+        (string Folder, string File, string Title, string Artist, string Album, string Year, int Track)[] tracks =
+        [
+            ("Beethoven - Symphony No 5", "01 Allegro con brio.mp3", "I. Allegro con brio", "Ludwig van Beethoven", "Symphony No. 5", "1808", 1),
+            ("Beethoven - Symphony No 5", "02 Andante con moto.mp3", "II. Andante con moto", "Ludwig van Beethoven", "Symphony No. 5", "1808", 2),
+            ("Beethoven - Symphony No 5", "03 Scherzo.mp3", "III. Scherzo. Allegro", "Ludwig van Beethoven", "Symphony No. 5", "1808", 3),
+            ("Beethoven - Symphony No 5", "04 Allegro.mp3", "IV. Allegro", "Ludwig van Beethoven", "Symphony No. 5", "1808", 4),
+            ("Beethoven - Symphony No 5", "05 Coda.mp3", "IV. Allegro - Coda", "Ludwig van Beethoven", "Symphony No. 5", "1808", 5),
+
+            // Same album, spelt with a suffix nothing else in the set has. This
+            // is the "wrong only in company" case, and the Consistency picture.
+            ("Beethoven - Symphony No 5", "06 Finale.mp3", "IV. Finale", "Ludwig van Beethoven", "Symphony No. 5 (Remastered)", "1808", 6),
+
+            ("Vivaldi/The Four Seasons", "01 Spring I.mp3", "Spring - I. Allegro", "Antonio Vivaldi", "The Four Seasons", "1725", 1),
+            ("Vivaldi/The Four Seasons", "02 Spring II.mp3", "Spring - II. Largo", "Antonio Vivaldi", "The Four Seasons", "1725", 2),
+
+            // A title carrying a release-site advert - repairable exactly, and
+            // what lights up the Tag problems button.
+            ("Vivaldi/The Four Seasons", "03 Summer I.mp3", "Summer - I. Allegro WWW.EXAMPLE-RIPS.COM", "Antonio Vivaldi", "The Four Seasons", "1725", 3),
+
+            ("Vivaldi/The Four Seasons", "04 Autumn I.mp3", "Autumn - I. Allegro", "Antonio Vivaldi", "The Four Seasons", "1725", 4),
+            ("Vivaldi/The Four Seasons", "05 Winter I.mp3", "Winter - I. Allegro non molto", "Antonio Vivaldi", "The Four Seasons", "1725", 5),
+
+            // The same recording twice, in two places. One of them has to go,
+            // and which one is the question the duplicate rules answer.
+            ("Loose ends", "spring i.mp3", "Spring - I. Allegro", "Antonio Vivaldi", "The Four Seasons", "1725", 1),
+        ];
+
+        foreach (var t in tracks)
+        {
+            var dir = Path.Combine(music, t.Folder.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(dir);
+
+            Run(ffmpeg,
+                "-hide_banner -loglevel error -y "
+                + "-f lavfi -i anullsrc=r=44100:cl=stereo -t 3 "
+                + $"-metadata title=\"{t.Title}\" "
+                + $"-metadata artist=\"{t.Artist}\" "
+                + $"-metadata album=\"{t.Album}\" "
+                + $"-metadata album_artist=\"{t.Artist}\" "
+                + $"-metadata date=\"{t.Year}\" "
+                + $"-metadata track=\"{t.Track}\" "
+                + $"-q:a 9 \"{Path.Combine(dir, t.File)}\"");
+        }
+
+        return music;
+    }
+
+    /// <summary>Where a tool is, or null. The music scan prompts when one is missing.</summary>
+    private static string? Which(string exe)
+    {
+        var onPath = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator);
+
+        return onPath
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .Select(d => Path.Combine(d.Trim(), exe + ".exe"))
+            .FirstOrDefault(File.Exists);
+    }
+
+    private static void Run(string exe, string args)
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, args)
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        })!;
+
+        p.StandardError.ReadToEnd();
+        p.WaitForExit();
+    }
+
+    private static PyreMediaSettings PrepareSettings(string library, string? music)
     {
         var s = PyreMediaSettings.Load();     // scratch folder, so this is fresh
         s.TvFolders.Add(library);
         s.SetupCompleted = true;               // Remux no longer opens a modal
+
+        if (music is not null)
+        {
+            s.MusicFolders.Add(music);
+
+            // The scan asks before running without these, and a modal in a build
+            // tool is a hang rather than a question. Point it at what was found.
+            s.FfmpegPath = Which("ffmpeg") ?? s.FfmpegPath;
+            s.FfprobePath = Which("ffprobe") ?? s.FfprobePath;
+        }
+
         s.Save();
         return s;
     }
 
     // ---------------- Captures ----------------
 
-    private static Dictionary<string, string> CaptureAll(PyreMediaSettings settings, string library)
+    private static Dictionary<string, string> CaptureAll(
+        PyreMediaSettings settings, string library, string? music)
     {
         var shots = new Dictionary<string, string>();
 
@@ -217,7 +326,14 @@ internal static class Program
                 };
                 Shots.Capture(warm, Path.Combine(_shots, "_warmup.png"), 400, 300, TimeSpan.FromSeconds(1));
             }
-            catch (Exception) { /* expected to be blank the first time or two */ }
+            catch (Exception ex)
+            {
+                // Blank or zero-sized is the expected outcome for the first one or
+                // two. Said out loud rather than swallowed, because "laid out at
+                // 0x0" for every warm-up means there is no interactive desktop -
+                // and that diagnosis is worth more than the silence was.
+                Console.WriteLine($"  warm-up {i + 1}: {ex.Message}");
+            }
         }
 
         File.Delete(Path.Combine(_shots, "_warmup.png"));
@@ -259,6 +375,73 @@ internal static class Program
             var files = Directory.GetFiles(library, "*.mkv", SearchOption.AllDirectories).Take(4).ToList();
             return new RemuxWindow(settings, history, files, "The Cisco Kid");
         }, 1100, 800, 4);
+
+        // ---- the audio side ----
+        //
+        // Skipped rather than failed when there is no ffmpeg to generate a
+        // library with: the manual is still worth building without these two.
+        if (music is null)
+        {
+            Log.Add("SKIPPED audio + consistency - no ffmpeg, so there is no music to photograph");
+            return shots;
+        }
+
+        // The Audio tab is a pane inside the shell, not a window of its own, so
+        // this photographs the whole shell with that tab selected - which is
+        // what the reader is actually looking at.
+        //
+        // The scan cannot be started before the window is shown: an unshown
+        // window has no size and generates no rows. So it is kicked off on the
+        // first readiness poll, and the polls after that wait for it.
+        var started = false;
+
+        bool ScannedMusic(Window w)
+        {
+            if (w.FindName("Tabs") is not System.Windows.Controls.TabControl tabs) return false;
+            if (w.FindName("MusicPane") is not System.Windows.Controls.UserControl pane) return false;
+
+            tabs.SelectedIndex = 1;
+
+            var grid = pane.FindName("GridPlan") as System.Windows.Controls.DataGrid;
+            var scan = pane.FindName("BtnScan") as System.Windows.Controls.Button;
+            var status = pane.FindName("TxtStatus") as System.Windows.Controls.TextBlock;
+
+            _lastState = $" [rows={grid?.Items.Count} scan-enabled={scan?.IsEnabled}"
+                         + $" status=\"{status?.Text}\"]";
+
+            if (!started && scan is { IsEnabled: true })
+            {
+                started = true;
+                scan.RaiseEvent(new RoutedEventArgs(
+                    System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                return false;
+            }
+
+            // Enabled again means the scan has finished, not merely that rows
+            // have begun to appear.
+            return started && scan is { IsEnabled: true } && grid is { Items.Count: > 0 };
+        }
+
+        Shot("audio", () => new PyreMedia.App.MainWindow(), 1280, 860, 90, ScannedMusic);
+        _lastState = "";
+
+        // The consistency screen is built from the real examination of the real
+        // fixture files, not from hand-written rows - if the rules stop finding
+        // the disagreement planted in the library, this picture goes missing and
+        // says so, which is the point of generating the manual at all.
+        Shot("consistency", () =>
+        {
+            // By folder, not by album tag. Grouping on the tag would put the one
+            // file that says "Dummy (Remastered)" in a set of its own, where it
+            // agrees with everything - and the disagreement this screen exists
+            // to show would vanish exactly when it matters.
+            var albums = MusicFileReader.ReadFolder(music)
+                .GroupBy(t => Path.GetDirectoryName(t.Path) ?? "", StringComparer.OrdinalIgnoreCase)
+                .Select(g => (IReadOnlyList<TrackTags>)g.ToList())
+                .ToList();
+
+            return new ConsistencyWindow(MusicConsistency.Examine(albums));
+        }, 900, 620);
 
         return shots;
     }

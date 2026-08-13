@@ -41,6 +41,48 @@ public static class NameTokens
 
     public static string ForEpisode(string format) => Translate(format, Episode);
 
+    /// <summary>
+    /// The other direction: turn a saved numeric format back into names, so the
+    /// settings box shows "{title} {season}x{episode} {name}" rather than
+    /// "{0} {1}x{3} {2}".
+    ///
+    /// Both forms work and always have, which is exactly why this was missed -
+    /// nothing was broken, the box simply showed the unreadable one for anybody
+    /// whose settings predated names. The formats are only stored; how they are
+    /// written down is presentation.
+    /// </summary>
+    public static string NameEpisode(string format) => Rename(format, EpisodePreferred);
+
+    public static string NameTitleYear(string format) => Rename(format, TitleYearPreferred);
+
+    /// <summary>
+    /// One name per index, for going back. The maps above are many-to-one -
+    /// "series", "show" and "showtitle" all mean 0 - so the reverse has to pick
+    /// the one to show, and it should be the one the manual uses.
+    /// </summary>
+    private static readonly Dictionary<int, string> EpisodePreferred = new()
+    {
+        [0] = "title", [1] = "season", [2] = "name", [3] = "episode"
+    };
+
+    private static readonly Dictionary<int, string> TitleYearPreferred = new()
+    {
+        [0] = "title", [1] = "year"
+    };
+
+    private static string Rename(string format, Dictionary<int, string> map)
+    {
+        if (string.IsNullOrEmpty(format) || !format.Contains('{')) return format;
+
+        // Only a brace holding nothing but digits. A format already using names
+        // passes through untouched, and so does "{0:00}" - a numeric token with
+        // a format specifier is doing something this cannot express in a name.
+        return Regex.Replace(format, @"\{(\d+)\}", m =>
+            int.TryParse(m.Groups[1].Value, out var i) && map.TryGetValue(i, out var name)
+                ? "{" + name + "}"
+                : m.Value);
+    }
+
     public static string ForTitleYear(string format) => Translate(format, TitleYear);
 
     /// <summary>

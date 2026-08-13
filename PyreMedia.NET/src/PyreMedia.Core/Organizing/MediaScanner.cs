@@ -74,6 +74,33 @@ public sealed class MediaItem
 
     public bool HasForeignAudio => ForeignAudio.Count > 0;
 
+    /// <summary>
+    /// How many audio and subtitle tracks the file carries, once probed.
+    ///
+    /// Counted during the pass that already reads every file for foreign
+    /// audio, so it costs nothing extra - the streams were in hand and were
+    /// being thrown away. Worth showing because the number is what tells
+    /// somebody whether a file is worth remuxing at all: a 2160p feature with
+    /// six audio tracks and twenty-five subtitle tracks is carrying several
+    /// gigabytes nobody in the house will ever play.
+    /// </summary>
+    public int AudioTracks { get; set; }
+
+    public int SubtitleTracks { get; set; }
+
+    /// <summary>
+    /// Which languages the audio and subtitle tracks are in, in the order the
+    /// file lists them, without repeats.
+    ///
+    /// Counts on their own are not actionable - six audio tracks you cannot
+    /// identify tells you a file is large and nothing about whether the extras
+    /// matter. Six tracks reading eng, spa, fre, pol, ita, deu tells you at a
+    /// glance that five of them will never be played in this house.
+    /// </summary>
+    public List<string> AudioLanguages { get; } = [];
+
+    public List<string> SubtitleLanguages { get; } = [];
+
     public string Root { get; init; } = string.Empty;
 
     public string KindLabel => Kind == MediaKind.TvEpisode ? "TV" : "Movie";
@@ -238,12 +265,16 @@ public sealed class MediaScanner(PyreMediaSettings settings)
 
             try
             {
-                // Loose files sitting directly in the root.
+                // Loose files sitting directly in the root, gathered by show.
+                var loose = new List<MediaItem>();
+
                 foreach (var file in Directory.EnumerateFiles(root).Where(IsVideo))
                 {
                     ct.ThrowIfCancellationRequested();
-                    found.Add(Classify(root, System.IO.Path.GetFileName(file), [file], root, loose: true));
+                    loose.Add(Classify(root, System.IO.Path.GetFileName(file), [file], root, loose: true));
                 }
+
+                found.AddRange(GatherLooseEpisodes(loose));
 
                 // One entry per subfolder.
                 foreach (var dir in Directory.EnumerateDirectories(root))
@@ -291,6 +322,73 @@ public sealed class MediaScanner(PyreMediaSettings settings)
         }
 
         return [.. found.OrderBy(f => f.DisplayName, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Put loose episodes of one show together into a single entry.
+    ///
+    /// A folder of episodes has always been one item. Loose files were one item
+    /// each, so eight episodes of Reacher dropped in a scan root arrived as eight
+    /// separate rows, each wanting its own search and its own match - for one
+    /// show, whose answer is the same eight times.
+    ///
+    /// Only television, and only where the parsed show title agrees. Two loose
+    /// films are two films however alike their names, and a file whose title
+    /// could not be parsed is left on its own rather than swept into whichever
+    /// group it most resembles.
+    /// </summary>
+    private static IEnumerable<MediaItem> GatherLooseEpisodes(List<MediaItem> loose)
+    {
+        var groups = loose
+            .Where(i => i.Kind == MediaKind.TvEpisode
+                        && !string.IsNullOrWhiteSpace(i.SearchTitle))
+            .GroupBy(i => (i.SearchTitle.Trim(), i.SearchYear ?? ""),
+                     TitleYear)
+            .ToList();
+
+        var gathered = groups.Where(g => g.Count() > 1).ToList();
+        var taken = gathered.SelectMany(g => g).ToHashSet();
+
+        foreach (var item in loose.Where(i => !taken.Contains(i)))
+            yield return item;
+
+        foreach (var group in gathered)
+        {
+            var files = group.SelectMany(i => i.Files).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            var first = group.First();
+
+            yield return new MediaItem
+            {
+                Path = first.Path,               // the scan root, as before
+                DisplayName = first.SearchYear is { Length: 4 } y
+                    ? $"{first.SearchTitle} ({y})"
+                    : first.SearchTitle,
+                Kind = MediaKind.TvEpisode,
+                Files = files,
+                MainFile = files.OrderByDescending(SafeLength).First(),
+                SearchTitle = first.SearchTitle,
+                SearchYear = first.SearchYear,
+                IsLooseFile = true,
+                Root = first.Root,
+                Nfo = group.Select(i => i.Nfo).FirstOrDefault(n => n is not null)
+            };
+        }
+    }
+
+    /// <summary>Show title and year compared the way a person would read them.</summary>
+    private static readonly IEqualityComparer<(string Title, string Year)> TitleYear =
+        new TitleYearComparer();
+
+    private sealed class TitleYearComparer : IEqualityComparer<(string Title, string Year)>
+    {
+        public bool Equals((string Title, string Year) a, (string Title, string Year) b) =>
+            string.Equals(a.Title, b.Title, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(a.Year, b.Year, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Title, string Year) v) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(v.Title),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(v.Year));
     }
 
     private MediaItem Classify(string path, string displayName, List<string> videos, string root, bool loose)
@@ -792,6 +890,11 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
 
             if (subExts.Contains(ext)) continue;
 
+            // A download marker is not a leftover - it is a file in use. It
+            // outlives the extension list deliberately: adding ".!ut" to that
+            // list one day would otherwise start deleting live transfers.
+            if (Downloads.IsMarker(name)) continue;
+
             string? reason = null;
 
             if (settings.DeleteSamples && IsSample(name, file, ext, videoExts, mainSize))
@@ -919,12 +1022,22 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
     {
         // Flat: leave the file where it is.
         //
-        // Except for a combined entry. Treating eight folders as one show is a
-        // statement that they belong together, and the only way to carry that out
-        // is to gather them into one show folder with a subfolder per season.
-        // Renaming them where they sit would leave the split exactly as it was and
-        // make combining pointless.
-        if (!settings.MoveTvFiles && !item.IsCombined)
+        // Two exceptions, and both are cases where "where it is" is not a place.
+        //
+        // A combined entry. Treating eight folders as one show is a statement
+        // that they belong together, and the only way to carry that out is to
+        // gather them into one show folder with a subfolder per season. Renaming
+        // them where they sit would leave the split exactly as it was and make
+        // combining pointless.
+        //
+        // And a loose file, which is the case this setting was never about. Flat
+        // mode means "do not restructure a library that is already organised" -
+        // it assumes the episode is sitting in its show's folder and should stay
+        // there. An episode loose in the scan root is in no show's folder, so
+        // leaving it there is not preserving an arrangement, it is declining to
+        // make one. X-Men '97 came out of a scan correctly renamed and still
+        // lying in the root beside six show folders.
+        if (!settings.MoveTvFiles && !item.IsCombined && !item.IsLooseFile)
             return Path.Combine(Path.GetDirectoryName(file) ?? item.Path, newName);
 
         // A loose file has no folder of its own - its Path is the scan root. Give
@@ -970,6 +1083,21 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
 
         foreach (var sub in FindSubtitles(source))
             action.Subtitles.Add(sub);
+
+        // Still arriving. A download in progress is a file the client is holding
+        // open and expects to find where it left it, so renaming it breaks the
+        // transfer and usually the client's record of it too - and the result
+        // looks like a corrupt file rather than like this program's doing.
+        //
+        // Found on a real library: forty-two .!ut placeholders beside a part-
+        // downloaded Stranger Things. Reported rather than skipped silently,
+        // because "it left half my library alone" needs a reason attached.
+        if (Downloads.InProgress(source) is { } client)
+        {
+            action.Status = PlanStatus.Problem;
+            action.Problem = $"Still downloading ({client}) - left alone until it finishes";
+            return action;
+        }
 
         // Ordinal, so a name that differs only in capitalisation still counts as
         // a change: "the office" becomes "The Office" when the provider says so.
@@ -1232,5 +1360,51 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
         }
 
         return false;
+    }
+}
+
+/// <summary>
+/// Recognising a file a download client is still writing.
+///
+/// Lives on its own rather than on the scanner or the planner because both need
+/// it for opposite reasons: the planner must not rename such a file, and the
+/// sweep must not delete the marker beside it.
+/// </summary>
+public static class Downloads
+{
+    /// <summary>
+    /// The download client still writing this file, or null when nothing is.
+    ///
+    /// Each of these sits beside the real file under the same name with a marker
+    /// appended, which is what makes it recognisable without asking any client
+    /// anything: "Episode.mkv" plus "Episode.mkv.!ut" means uTorrent has that
+    /// file open.
+    ///
+    /// These are never offered as junk to delete, whatever the extension list
+    /// says. Removing one mid-transfer loses the client's place in the file.
+    /// </summary>
+    public static readonly (string Suffix, string Client)[] Markers =
+    [
+        (".!ut", "uTorrent"),
+        (".part", "a download client"),
+        (".!qb", "qBittorrent"),
+        (".crdownload", "Chrome"),
+    ];
+
+    /// <summary>Whether a filename is itself one of those markers.</summary>
+    public static bool IsMarker(string name) =>
+        Markers.Any(m => name.EndsWith(m.Suffix, StringComparison.OrdinalIgnoreCase));
+
+    public static string? InProgress(string video)
+    {
+        var markers = Markers;
+
+        foreach (var (suffix, client) in markers)
+        {
+            try { if (File.Exists(video + suffix)) return client; }
+            catch (Exception) { /* unreadable is not evidence either way */ }
+        }
+
+        return null;
     }
 }

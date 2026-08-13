@@ -147,6 +147,7 @@
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="82" />
+                                                            <ColumnDefinition Width="74" />
                                                             <ColumnDefinition Width="64" />
                                                             <ColumnDefinition Width="*" />
                                                             <ColumnDefinition Width="Auto" />
@@ -162,12 +163,23 @@
                                                                   IsChecked="{Binding IsDefault, Mode=TwoWay}"
                                                                   Visibility="{Binding CanBeDefault, Converter={StaticResource BoolToVis}}"
                                                                   IsEnabled="{Binding Keep}" />
-                                                        <TextBlock Grid.Column="2" Text="{Binding KindLabel}"
+                                                        <!-- Inherited from the file and changeable. The flag is
+                                                             often wrong, and nothing shows it until you are
+                                                             watching: a full track marked forced turns permanent
+                                                             subtitles on, and a real one left unmarked leaves the
+                                                             alien dialogue untranslated. -->
+                                                        <CheckBox Grid.Column="2" Content="forced" FontSize="10"
+                                                                  VerticalAlignment="Center"
+                                                                  ToolTip="Mark this subtitle track forced - players show it even with subtitles off"
+                                                                  IsChecked="{Binding IsForced, Mode=TwoWay}"
+                                                                  Visibility="{Binding CanBeForced, Converter={StaticResource BoolToVis}}"
+                                                                  IsEnabled="{Binding Keep}" />
+                                                        <TextBlock Grid.Column="3" Text="{Binding KindLabel}"
                                                                    FontSize="11" VerticalAlignment="Center"
                                                                    Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                                        <TextBlock Grid.Column="3" Text="{Binding Description}"
+                                                        <TextBlock Grid.Column="4" Text="{Binding Description}"
                                                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Grid.Column="4" Text="{Binding Note}" FontSize="11"
+                                                        <TextBlock Grid.Column="5" Text="{Binding Note}" FontSize="11"
                                                                    VerticalAlignment="Center" Margin="10,0,0,0"
                                                                    TextWrapping="Wrap" MaxWidth="260"
                                                                    Foreground="{DynamicResource SystemFillColorCautionBrush}" />

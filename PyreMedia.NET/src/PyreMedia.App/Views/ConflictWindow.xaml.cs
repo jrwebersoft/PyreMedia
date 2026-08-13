@@ -35,10 +35,36 @@ public partial class ConflictRow : ObservableObject
     /// The one thing worth interrupting for: the two files look like the same
     /// file, so replacing gains nothing and risks something.
     /// </summary>
-    public string? Note =>
-        Conflict.LooksIdentical
-            ? "These are the same size - this may already be the same file."
-            : null;
+    public string? Note
+    {
+        get
+        {
+            // Why these two are in each other's way, when whoever found the
+            // clash said. "A file of this name is already there" and "another
+            // file in this run wants the same name" need opposite answers, and
+            // a dialog showing two paths without saying which case it is makes
+            // the reader work that out themselves.
+            //
+            // This was added to FileConflict and then never shown - the value
+            // was being filled in and thrown away.
+            var why = Conflict.Reason;
+
+            var same = Conflict.LooksIdentical
+                ? "These are the same size - this may already be the same file."
+                : null;
+
+            return (why, same) switch
+            {
+                (null, null) => null,
+                (null, _) => same,
+                (_, null) => Capitalise(why!),
+                _ => $"{Capitalise(why!)}  {same}"
+            };
+        }
+    }
+
+    private static string Capitalise(string text) =>
+        text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..] + ".";
 
     public bool HasNote => Note is not null;
 

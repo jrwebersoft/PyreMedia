@@ -424,6 +424,16 @@ public partial class ArtworkWindow
         var written = 0;
         var failed = 0;
 
+        // Guarded because this is an async void handler: an exception escaping
+        // one does not reach a caller, it reaches the dispatcher, and an
+        // unhandled exception there ends the process. Downloading artwork
+        // touches the network and the disk, so it has two good reasons to
+        // throw, and losing the whole program to a failed download would be a
+        // poor trade. The finally matters as much - without it a throw leaves
+        // the spinner turning and Apply disabled for ever.
+        try
+        {
+
         // A deliberate choice replaces what is there. Preserve-existing is about
         // not overwriting things unasked, and this was asked.
         var forced = new PyreMediaSettings
@@ -432,43 +442,55 @@ public partial class ArtworkWindow
             PreserveExistingArtwork = false
         };
 
-        foreach (var (kind, tiles) in _tiles)
-        {
-            var pick = tiles.FirstOrDefault(t => t.IsChosen && !t.IsCurrent);
-            if (pick is null) continue;
-
-            foreach (var target in _targets)
+            foreach (var (kind, tiles) in _tiles)
             {
-                TxtStatus.Text = $"Saving {kind}  -  {Path.GetFileName(target)}";
+                var pick = tiles.FirstOrDefault(t => t.IsChosen && !t.IsCurrent);
+                if (pick is null) continue;
 
-                var r = await ArtworkWriter.WriteAsync(_http, target, kind, pick.Option.Url, forced);
+                foreach (var target in _targets)
+                {
+                    TxtStatus.Text = $"Saving {kind}  -  {Path.GetFileName(target)}";
 
-                if (r.Outcome == ArtworkWriter.Outcome.Written)
-                {
-                    written++;
-                    _settings.ChosenArtwork[r.Path] = pick.Option.Url;
+                    var r = await ArtworkWriter.WriteAsync(_http, target, kind, pick.Option.Url, forced);
+
+                    if (r.Outcome == ArtworkWriter.Outcome.Written)
+                    {
+                        written++;
+                        _settings.ChosenArtwork[r.Path] = pick.Option.Url;
+                    }
+                    else if (r.Outcome == ArtworkWriter.Outcome.Failed)
+                    {
+                        failed++;
+                        AppLog.Info($"artwork: {Path.GetFileName(target)} {kind} - {r.Detail}");
+                    }
                 }
-                else if (r.Outcome == ArtworkWriter.Outcome.Failed)
-                {
-                    failed++;
-                    AppLog.Info($"artwork: {Path.GetFileName(target)} {kind} - {r.Detail}");
-                }
+
+                // What was chosen is now what's saved.
+                foreach (var t in tiles) t.IsCurrent = false;
+                pick.IsCurrent = true;
             }
 
-            // What was chosen is now what's saved.
-            foreach (var t in tiles) t.IsCurrent = false;
-            pick.IsCurrent = true;
+            _settings.Save();
+
+            TxtStatus.Text = failed == 0
+                ? $"Saved {written} image(s)."
+                : $"Saved {written}, {failed} failed - see the log for why.";
         }
+        catch (Exception ex)
+        {
+            AppLog.Info($"artwork: apply failed - {ex.Message}");
 
-        _settings.Save();
-
-        _loading = false;
-        Spinner.Visibility = Visibility.Collapsed;
-        RefreshPills();
-
-        TxtStatus.Text = failed == 0
-            ? $"Saved {written} image(s)."
-            : $"Saved {written}, {failed} failed - see the log for why.";
+            TxtStatus.Text = written > 0
+                ? $"Saved {written} image(s), then stopped: {ex.Message}"
+                : $"Could not save: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            Spinner.Visibility = Visibility.Collapsed;
+            BtnApply.IsEnabled = true;
+            RefreshPills();
+        }
     }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();

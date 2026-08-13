@@ -570,10 +570,10 @@ public partial class MainViewModel : ObservableObject
             _flagCts?.Dispose();
             _flagCts = null;
 
-            if (_settings.FlagForeignAudio)
+            if (_settings.ReadTrackDetails)
             {
                 _flagCts = new CancellationTokenSource();
-                _ = FlagForeignAudioAsync(_flagCts.Token);
+                _ = ReadTrackDetailsAsync(_flagCts.Token);
             }
         }
         catch (Exception ex)
@@ -600,7 +600,7 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     private CancellationTokenSource? _flagCts;
 
-    private async Task FlagForeignAudioAsync(CancellationToken ct)
+    private async Task ReadTrackDetailsAsync(CancellationToken ct)
     {
         var probe = new MediaProbe(_settings.FfprobePath);
 
@@ -640,6 +640,25 @@ public partial class MainViewModel : ObservableObject
                     item.Media.ForeignAudio.Clear();
                     item.Media.ForeignAudio.AddRange(foreign);
                     if (foreign.Count > 0) flagged++;
+
+                    // Free - the streams are already here and were being
+                    // discarded. Cover art is a video stream, not a subtitle,
+                    // so neither count is affected by it.
+                    item.Media.AudioTracks = info.Audio.Count();
+
+                    var subtitles = info.Streams.Where(s => s.Kind == StreamKind.Subtitle).ToList();
+                    item.Media.SubtitleTracks = subtitles.Count;
+
+                    // In file order rather than sorted, because the order is
+                    // itself information - the first audio track is the one
+                    // that plays by default.
+                    item.Media.AudioLanguages.Clear();
+                    item.Media.AudioLanguages.AddRange(
+                        info.Audio.Select(a => a.Language).Distinct(StringComparer.OrdinalIgnoreCase));
+
+                    item.Media.SubtitleLanguages.Clear();
+                    item.Media.SubtitleLanguages.AddRange(
+                        subtitles.Select(s => s.Language).Distinct(StringComparer.OrdinalIgnoreCase));
 
                     // 3D the filename never mentioned. Only worth reading when
                     // the name is silent - a hand-written tag is more reliable,
@@ -976,6 +995,13 @@ public partial class MainViewModel : ObservableObject
         StatusText = _plan.HasWork || _plan.FolderRename is not null
             ? _plan.ChangeCount == 1 ? "1 change to review" : $"{_plan.ChangeCount} changes to review"
             : "Nothing to change";
+
+        // Say why a library that looks perfectly correct is full of moves. The
+        // filenames are right and every episode is with its show, so without
+        // this the plan reads as the program having changed its mind rather
+        // than as the season-folder setting doing what it says.
+        if (_plan.GainsSeasonFolders)
+            StatusText += " - this show keeps its episodes loose, so they are being gathered into season folders";
     }
 
     // ---------------- Renumber ----------------
@@ -1274,6 +1300,37 @@ public partial class MainViewModel : ObservableObject
             }
         }
 
+        // The show's own tvshow.nfo, once per show rather than per episode.
+        // Without it Kodi has nothing to hang the series artwork, plot or rating
+        // on and identifies the show by scraping the folder name instead - so a
+        // folder it reads differently becomes a second, half-empty series beside
+        // the real one.
+        if (SearchAsTv && _currentShow is { } tvShow)
+        {
+            foreach (var folder in ShowFoldersOf(applied))
+            {
+                try
+                {
+                    var result = NfoWriter.WriteShow(folder, tvShow, _settings);
+
+                    switch (result.Outcome)
+                    {
+                        case NfoWriter.Outcome.Written: written++; break;
+                        case NfoWriter.Outcome.Updated: refreshed++; break;
+                        case NfoWriter.Outcome.Failed:
+                            failed++;
+                            WriteLog($"nfo: tvshow.nfo - {result.Detail}");
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    AppLog.Error($"tvshow.nfo in {folder}", ex);
+                }
+            }
+        }
+
         if (written + refreshed + failed == 0) return;
 
         var bits = new List<string>();
@@ -1282,6 +1339,43 @@ public partial class MainViewModel : ObservableObject
         if (failed > 0) bits.Add($"{failed} failed");
 
         WriteLog("nfo: " + string.Join(", ", bits) + ".");
+    }
+
+    /// <summary>
+    /// The folders that should hold a tvshow.nfo, worked out from where the
+    /// episodes actually landed rather than from the plan.
+    ///
+    /// Taken from the results because that is what survives every arrangement:
+    /// a season folder means the show folder is its parent, a flat show folder
+    /// means the file's own folder is it, and a combined entry writes several
+    /// shows' worth of episodes in one pass. Reading the plan's show folder
+    /// instead was right in the ordinary case and wrong in all three of those.
+    /// </summary>
+    private IEnumerable<string> ShowFoldersOf(List<PlannedAction> applied)
+    {
+        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var action in applied)
+        {
+            if (action.TargetPath is not { } target) continue;
+            if (Path.GetDirectoryName(target) is not { } dir) continue;
+
+            // A season folder is not the show. Its parent is.
+            var isSeason = PyreMedia.Core.Naming.EpisodeMatcher.ParseSeasonFolder(
+                Path.GetFileName(dir), _settings.SeasonFolderName) is not null;
+
+            var show = isSeason ? Path.GetDirectoryName(dir) : dir;
+
+            // Never the scan root itself. A loose file that stayed put would put
+            // one tvshow.nfo over a folder holding every show there is, and Kodi
+            // would read the whole staging area as a single series.
+            if (string.IsNullOrEmpty(show)) continue;
+            if (MediaScanner.ScanRoots(_settings).Any(r => MediaScanner.SameFolder(r, show))) continue;
+
+            folders.Add(show);
+        }
+
+        return folders;
     }
 
     /// <summary>

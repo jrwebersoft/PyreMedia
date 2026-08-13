@@ -117,6 +117,22 @@ public sealed class RenamePlan
     public List<string> FoldersToCreate { get; init; } = [];
 
     /// <summary>
+    /// This show keeps its episodes loose in the show folder, and the plan is
+    /// about to gather them into Season folders.
+    ///
+    /// Worth saying out loud rather than leaving to be inferred from a list of
+    /// moves. A library organised the flat way looks completely correct - the
+    /// filenames are right, every episode is where its show is - so a plan full
+    /// of moves against it is surprising until you know that a setting decided
+    /// it. This is what lets the scan say so in the same breath.
+    /// </summary>
+    public bool GainsSeasonFolders =>
+        FoldersToCreate.Count > 0
+        && Changes.Any(a => a.TargetPath is { } t
+                            && Path.GetDirectoryName(a.SourcePath) == ShowFolder
+                            && Path.GetDirectoryName(t) != ShowFolder);
+
+    /// <summary>
     /// The per-season folders a combined entry was assembled from. Once its files
     /// have moved into one show folder these are left standing and empty, so they
     /// are offered for tidying - and only removed if genuinely empty.

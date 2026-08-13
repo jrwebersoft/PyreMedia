@@ -352,5 +352,87 @@ public partial class AboutWindow
         }
     }
 
+    /// <summary>
+    /// Open the manual.
+    ///
+    /// There was no way to reach it from inside the program at all - it is one
+    /// self-contained HTML page, and knowing that it existed and where it had
+    /// been put was left entirely to the reader.
+    ///
+    /// A copy beside the exe wins, so a newer one can be dropped in without
+    /// rebuilding. Otherwise the one carried inside the binary is written out
+    /// and opened, which is the path that always works: a single-file build has
+    /// its documentation in it and cannot be separated from it.
+    /// </summary>
+    private void OnOpenManual(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = ManualBesideTheExe() ?? UnpackManual();
+
+            if (path is null)
+            {
+                MessageBox.Show(this,
+                    "This build doesn't carry the manual.\n\n"
+                    + "It is one file called \"PyreMedia Manual.html\" - put it beside "
+                    + "PyreMedia.exe and this button will open it.\n\n"
+                    + $"Looked in:\n{AppContext.BaseDirectory}",
+                    "Manual not found", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Open manual", ex);
+            MessageBox.Show(this, $"Could not open the manual: {ex.Message}",
+                "Manual", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private static string? ManualBesideTheExe()
+    {
+        var here = AppContext.BaseDirectory;
+
+        string[] candidates =
+        [
+            Path.Combine(here, "PyreMedia Manual.html"),
+            Path.Combine(here, "PyreMedia-Manual.html"),
+            Path.Combine(here, "docs", "PyreMedia-Manual.html"),
+        ];
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    /// <summary>
+    /// Write the built-in manual out so a browser can open it, and return where.
+    ///
+    /// Rewritten whenever the copy on disk is a different size, so upgrading the
+    /// program does not leave the old manual being opened for ever. Kept under
+    /// the program's own folder rather than the temp directory, because a
+    /// browser tab left open for a week should not be pointing at something
+    /// Windows has cleaned up underneath it.
+    /// </summary>
+    private static string? UnpackManual()
+    {
+        using var stream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream("PyreMedia.Manual.html");
+
+        if (stream is null) return null;
+
+        var path = Path.Combine(AppPaths.Folder, "PyreMedia Manual.html");
+
+        if (!File.Exists(path) || new FileInfo(path).Length != stream.Length)
+        {
+            Directory.CreateDirectory(AppPaths.Folder);
+
+            using var file = File.Create(path);
+            stream.CopyTo(file);
+        }
+
+        return path;
+    }
+
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 }

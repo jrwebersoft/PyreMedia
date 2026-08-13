@@ -72,9 +72,11 @@
                     <TextBlock Text="PyreMedia" FontSize="24" FontWeight="Bold" />
                     <TextBlock x:Name="TxtVersion" FontSize="12" Margin="0,2,0,0"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="Created by JRWeberSoft" FontSize="13" Margin="0,4,0,0"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock FontSize="13" Margin="0,4,0,0" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                        <Run Text="Created by " /><Hyperlink NavigateUri="https://github.com/jrwebersoft"
+                                                             RequestNavigate="OnNavigate">JRWeberSoft</Hyperlink>
+                    </TextBlock>
                     <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0"
                                Text="Renames and organises TV and film files, and strips unwanted audio and subtitle tracks by remuxing. Nothing is written to disk until you have seen it listed and approved it, and every change can be undone from History." />
                 </StackPanel>
@@ -93,11 +95,11 @@
                                    Text="Created by JRWeberSoft. The engine, interface, providers, remux pipeline and metadata handling were all written from scratch on .NET 10. It is not a fork, a port or a repackaging of anything." />
                         <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
                                    Text="Inspired by MediaScout 3.x, a Windows renamer unmaintained for years." />
-                        <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
-                                   Text="Licensed under PolyForm Noncommercial 1.0.0 - free to use, change and share for any noncommercial purpose, including personal use and use by charities, schools and public bodies. Copyright 2026 jrwebersoft." />
-                        <ui:HyperlinkButton Content="github.com/jrwebersoft"
-                                            NavigateUri="https://github.com/jrwebersoft"
-                                            Padding="0,2" Margin="0,2,0,0" />
+                        <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0">
+                            <Run Text="Source, releases and issues: " /><Hyperlink
+                                NavigateUri="https://github.com/jrwebersoft/PyreMedia"
+                                RequestNavigate="OnNavigate">github.com/jrwebersoft/PyreMedia</Hyperlink>
+                        </TextBlock>
                     </StackPanel>
                 </ui:Card>
 
@@ -158,6 +160,9 @@
                            Text="Data from TMDb and TheTVDB. This product uses the TMDb API but is not endorsed or certified by TMDb." />
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <ui:Button x:Name="BtnManual" Content="Manual" Icon="{ui:SymbolIcon BookOpen24}"
+                               Click="OnOpenManual" Appearance="Secondary" Margin="0,0,8,0"
+                               ToolTip="Open the manual - one page, opens in your browser" />
                     <ui:Button Content="Copy details" Icon="{ui:SymbolIcon DocumentText24}"
                                Click="OnCopy" Appearance="Secondary" Margin="0,0,8,0"
                                ToolTip="Copy versions and paths, for when something needs diagnosing" />

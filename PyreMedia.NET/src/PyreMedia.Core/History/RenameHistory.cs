@@ -8,7 +8,32 @@ public enum HistoryAction
     Rename,
     Move,
     FolderRename,
-    Delete
+    Delete,
+
+    // Appended, never reordered: these are serialised by their numeric value
+    // and a history file written last month has to keep meaning the same thing.
+
+    /// <summary>
+    /// A file duplicated rather than moved - the same recording wanted in two
+    /// albums at once. Reversed by deleting the copy, which is safe precisely
+    /// because the original was left where it was.
+    /// </summary>
+    Copy,
+
+    /// <summary>
+    /// A redundant file set aside instead of deleted. <see cref="HistoryEntry.NewPath"/>
+    /// is where it went, so reverting is a move back rather than a restore from
+    /// nowhere. Deleting outright is not undoable and a duplicate detector is
+    /// not sure enough to earn that.
+    /// </summary>
+    Quarantine,
+
+    /// <summary>
+    /// Tags rewritten in place, so both paths are the same one. What the fields
+    /// held before is in <see cref="HistoryEntry.Before"/>, which is what makes
+    /// this undoable at all.
+    /// </summary>
+    Retag
 }
 
 public sealed class HistoryEntry
@@ -27,6 +52,15 @@ public sealed class HistoryEntry
 
     public string OldPath { get; set; } = string.Empty;
     public string NewPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// For a <see cref="HistoryAction.Retag"/>, what the fields held before it
+    /// ran - the only record of them once the file has been rewritten. Null on
+    /// every other action, and omitted from the file entirely, so history
+    /// written before this existed still reads.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string?>? Before { get; set; }
 
     [JsonIgnore] public string OldName => Path.GetFileName(OldPath);
     [JsonIgnore] public string NewName => Path.GetFileName(NewPath);
@@ -64,7 +98,8 @@ public sealed class RenameHistory
     public string FilePath => _path;
 
     public void Add(HistoryAction action, string oldPath, string newPath,
-                    string? title, string? matchId, string? batchId = null)
+                    string? title, string? matchId, string? batchId = null,
+                    Dictionary<string, string?>? before = null)
     {
         var entry = new HistoryEntry
         {
@@ -74,7 +109,8 @@ public sealed class RenameHistory
             NewPath = newPath,
             Title = title,
             MatchId = matchId,
-            BatchId = batchId
+            BatchId = batchId,
+            Before = before
         };
 
         var line = JsonSerializer.Serialize(entry, Options) + Environment.NewLine;

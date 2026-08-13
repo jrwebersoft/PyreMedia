@@ -15,6 +15,26 @@ public sealed class RemuxFilePlan
     public int? DefaultSubtitleIndex { get; set; }
 
     /// <summary>
+    /// Which subtitle tracks come out marked forced, by absolute stream index.
+    ///
+    /// Null means "whatever the file already says", which is what every caller
+    /// did before this existed. A set - even an empty one - is a decision, and
+    /// overrides the file.
+    /// <para>
+    /// Worth being able to override because the flag is often simply wrong.
+    /// A full subtitle track marked forced turns permanent subtitles on for a
+    /// film in your own language; a genuine forced track left unmarked means
+    /// the one line of alien dialogue goes untranslated. Neither is visible
+    /// until you are watching it.
+    /// </para>
+    /// </summary>
+    public HashSet<int>? ForcedSubtitles { get; set; }
+
+    /// <summary>Whether one subtitle stream should be written as forced.</summary>
+    public bool IsForced(MediaStream stream) =>
+        ForcedSubtitles?.Contains(stream.Index) ?? stream.IsForced;
+
+    /// <summary>
     /// Which video track a player should pick when a file carries more than one
     /// - a Dolby Vision version alongside an HDR10 one, say. Null when there's
     /// only one and the question doesn't arise.

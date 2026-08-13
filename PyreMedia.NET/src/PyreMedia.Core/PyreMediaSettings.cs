@@ -41,6 +41,78 @@ public sealed class PyreMediaSettings
     // ---- Folders (intentionally empty; chosen on first run) ----
     public List<string> TvFolders { get; set; } = [];
     public List<string> MovieFolders { get; set; } = [];
+    public List<string> MusicFolders { get; set; } = [];
+
+    // ---- Where finished media goes ----
+    //
+    // A staging folder is where things arrive and a library is where they live,
+    // and they are rarely the same disk. One destination per kind because they
+    // are not interchangeable: Kodi scans a film library and a television
+    // library separately, and a book filed among the albums is a book nobody
+    // will find again.
+    //
+    // Blank means not chosen yet rather than "the same place". Moving finished
+    // files into an unset destination would put them somewhere nobody picked,
+    // so the button asks instead.
+
+    public string MovieDestination { get; set; } = "";
+    public string TvDestination { get; set; } = "";
+    public string MusicDestination { get; set; } = "";
+    public string AudiobookDestination { get; set; } = "";
+
+    /// <summary>The destination for a kind of library, or "" if none is set.</summary>
+    public string DestinationFor(LibraryKind kind) => kind switch
+    {
+        LibraryKind.Movie => MovieDestination,
+        LibraryKind.Tv => TvDestination,
+        LibraryKind.Music => MusicDestination,
+        LibraryKind.Audiobook => AudiobookDestination,
+        _ => ""
+    };
+
+    // ---- Music ----
+
+    /// <summary>
+    /// Where a track goes, as a pattern. See <c>NamingFormat</c> for the fields
+    /// and for what the square brackets do.
+    /// </summary>
+    public string MusicFileFormat { get; set; } = "{albumartist}/{album}[ ({year})]/[{disc}-]{track:00} {title}";
+
+    /// <summary>
+    /// Where an audiobook goes. Separate from the music pattern because a book
+    /// has no album and no track number worth the name - filing one by them
+    /// gives a folder called "Unknown Album" holding fifty-seven files called
+    /// "Track 04".
+    /// </summary>
+    public string AudiobookFormat { get; set; } = "{author}/{book}[ ({year})]/{chapter:000} {chaptertitle}";
+
+    /// <summary>
+    /// Compare the audio itself when tags and durations cannot separate a copy
+    /// from a different version. Costs about four tenths of a second per file
+    /// and only runs on files whose track numbers collide, but it is the
+    /// difference between 95% right and right.
+    /// </summary>
+    public bool UseFingerprinting { get; set; } = true;
+
+    /// <summary>
+    /// Measure loudness and write ReplayGain tags, so players even out a
+    /// library ripped over thirty years at wildly different levels.
+    ///
+    /// Off by default under the standing rule that anything which could degrade
+    /// a file is opt-in - though this one cannot. ReplayGain is a pair of
+    /// numbers in the tags telling the player how much to turn a track up or
+    /// down; the audio is never re-encoded and deleting the tags undoes it
+    /// completely. What it does cost is time: every file has to be decoded once
+    /// to measure it.
+    /// </summary>
+    public bool WriteReplayGain { get; set; } = false;
+
+    /// <summary>
+    /// Write corrected tags into the files as well as moving them. Off by
+    /// default: moving a file is undone by moving it back, and rewriting one
+    /// is a bigger promise.
+    /// </summary>
+    public bool WriteMusicTags { get; set; } = false;
 
     // ---- Movies ----
     public bool RenameMovieFiles { get; set; } = true;
@@ -93,11 +165,32 @@ public sealed class PyreMediaSettings
     public bool RenameTvFiles { get; set; } = true;
 
     /// <summary>
-    /// Off by default: files are renamed where they sit. Turn on to also move
-    /// episodes into Season folders and rename the containing folder - only
-    /// sensible for a properly organised library, not a staging area.
+    /// Move episodes into Season folders, and allow the containing folder to be
+    /// renamed to the canonical title.
+    ///
+    /// On by default. It was off, on the reasoning that renaming inside a folder
+    /// and rearranging a library are different sizes of promise - but the result
+    /// was a scan that produced perfect filenames and no Season folder, which
+    /// reads as a fault rather than as a choice, and was reported as one.
+    /// <para>
+    /// Season folders are also what Kodi, Plex and Jellyfin expect, so the
+    /// default that needed explaining was the one that did less. Nothing moves
+    /// without the plan being shown and Apply pressed, and it all reverts from
+    /// History, so the cost of the livelier default is a plan to look at rather
+    /// than a surprise.
+    /// </para>
     /// </summary>
-    public bool MoveTvFiles { get; set; } = false;
+    public bool MoveTvFiles { get; set; } = true;
+
+    /// <summary>
+    /// Scan the video folders as soon as the window opens.
+    ///
+    /// On by default. Opening on an empty list and waiting to be told to scan is
+    /// a step with no decision in it: the folders are already configured and the
+    /// answer is always yes. Scanning only reads - nothing is proposed until a
+    /// match is chosen, and nothing happens until Apply.
+    /// </summary>
+    public bool ScanOnLaunch { get; set; } = true;
 
     public bool OverwriteFiles { get; set; } = true;
 
@@ -122,15 +215,27 @@ public sealed class PyreMediaSettings
     public string AllowedSubtitles { get; set; } = ".sub;.idx;.srt";
 
     // ---- Cleanup ----
-    // All default OFF. Deletion is the one thing here that can't be undone by
-    // renaming back, so it stays opt-in and every file still appears as an
-    // approvable row before anything happens.
+    // On by default, and the word that carries the weight is "offer". Nothing
+    // here deletes anything: it adds a row to the preview, ticked, which can be
+    // cleared like any other, and deletions go to the Recycle Bin where the
+    // drive has one.
+    //
+    // They were off, on the reasoning that deletion is the one thing here that
+    // renaming back cannot undo. True, and it argued for the confirmation rather
+    // than for the default - off meant the release adverts and sample clips that
+    // come with every download simply stayed, and the setting that would have
+    // dealt with them was one nobody knew to look for.
+    //
+    // Two things are never offered whatever these say. A .nfo holding real Kodi
+    // metadata is checked by content, not extension, because a scraped sidecar
+    // and a scene advert share a suffix. And a download marker beside a file
+    // still arriving is a file in use rather than a leftover.
 
     /// <summary>Offer to delete sample clips (name contains "sample", or tiny beside the feature).</summary>
-    public bool DeleteSamples { get; set; } = false;
+    public bool DeleteSamples { get; set; } = true;
 
-    /// <summary>Offer to delete leftover scene files - .nfo, .txt, .sfv and friends.</summary>
-    public bool DeleteJunkFiles { get; set; } = false;
+    /// <summary>Offer to delete leftover scene files - .txt, .sfv, .url and friends.</summary>
+    public bool DeleteJunkFiles { get; set; } = true;
 
     public string JunkExtensions { get; set; } =
         ".nfo;.txt;.url;.sfv;.md5;.par2;.exe;.bat;.lnk;.diz;.website";
@@ -149,10 +254,27 @@ public sealed class PyreMediaSettings
     public string PreferredLanguage { get; set; } = "eng";
 
     /// <summary>
-    /// After a scan, probe files and mark any carrying audio in another language.
-    /// Off by default: it reads every file, so it costs a pass over the library.
+    /// After a scan, read each item's tracks: how many audio and subtitle
+    /// streams it carries, what languages they are in, whether any of them is
+    /// foreign, and whether the file is 3D without saying so in its name.
+    ///
+    /// On by default. It was off and named for one of those four things, which
+    /// is how the track counts and languages on the cards came to be switched
+    /// off by a setting called "flag foreign audio" - a file with a Hindi track
+    /// and two English subtitle tracks showed nothing at all, and nothing said
+    /// why.
+    ///
+    /// It costs a probe per item, not per file - the main file stands for the
+    /// folder. It runs after the scan is already usable, fills rows in as
+    /// answers arrive, and is called off the moment another scan starts.
+    /// <para>
+    /// The stored name is kept as it was so that turning it off stays turned
+    /// off across this rename. What it is called in the file is not worth
+    /// silently discarding somebody's choice over.
+    /// </para>
     /// </summary>
-    public bool FlagForeignAudio { get; set; } = false;
+    [JsonPropertyName("FlagForeignAudio")]
+    public bool ReadTrackDetails { get; set; } = true;
 
     /// <summary>Comma-separated ISO 639-2 codes. Empty keeps everything.</summary>
     public string KeepAudioLanguages { get; set; } = "eng";
@@ -420,6 +542,18 @@ public sealed class PyreMediaSettings
     public string TvdbApiKey { get; set; } = "";
 
     /// <summary>
+    /// AcoustID, for identifying music files that carry no usable tags at all.
+    ///
+    /// The only key here that is used to ask about the user's own library
+    /// rather than about a film or a series. What leaves the machine is a
+    /// chromaprint fingerprint and a duration - not the audio, not the
+    /// filename, not the path. Free, from acoustid.org/new-application.
+    /// </summary>
+    public string AcoustIdApiKey { get; set; } = "";
+
+    public bool HasAcoustIdKey => !string.IsNullOrWhiteSpace(AcoustIdApiKey);
+
+    /// <summary>
     /// Nothing can be searched for without this: every lookup, TV or film, goes
     /// through TMDb.
     /// </summary>
@@ -544,13 +678,89 @@ public sealed class PyreMediaSettings
     [JsonIgnore]
     private string? _origin;
 
+    /// <summary>
+    /// A file of API keys sitting beside the program, used to fill in any key
+    /// the settings do not already have.
+    ///
+    /// This exists so a working build can carry its owner's keys without them
+    /// being typed in again after every clean install - and, more to the point,
+    /// without them being in the source. A key in a source file is a key in the
+    /// repository, and a key in the repository is public the moment the
+    /// repository is, whatever is deleted afterwards.
+    ///
+    /// So it is read and never written, and the filename is in .gitignore. A
+    /// published build simply has no such file, and asks for keys the ordinary
+    /// way.
+    /// </summary>
+    public const string LocalKeysFile = "keys.local.json";
+
+    /// <summary>Where the keys file would be, beside the running program.</summary>
+    public static string LocalKeysPath =>
+        Path.Combine(AppContext.BaseDirectory, LocalKeysFile);
+
+    /// <summary>
+    /// Fill in any key this instance has not got from the local keys file.
+    ///
+    /// Only fills gaps. A key entered in Settings is the user's decision and
+    /// outranks a file they may have forgotten is there - and clearing a key
+    /// must stay cleared, or turning AcoustID off would silently undo itself
+    /// on the next start.
+    /// </summary>
+    /// <summary>
+    /// Rewrite any saved format that still uses numbers into names.
+    ///
+    /// Both forms have always worked, which is why this went unnoticed for so
+    /// long: nothing was broken, the settings box simply showed
+    /// "{0} {1}x{3} {2}" to anybody whose settings predated named
+    /// placeholders. Nothing in the numbers says which is the episode and
+    /// which is its title, and they do not even run in order.
+    ///
+    /// The stored value is only a record; how it is written down is
+    /// presentation, and the readable spelling is the one to keep.
+    /// </summary>
+    private void UseNamedPlaceholders()
+    {
+        TvFileFormat = Naming.NameTokens.NameEpisode(TvFileFormat);
+
+        MovieFileFormat = Naming.NameTokens.NameTitleYear(MovieFileFormat);
+        MovieFolderFormat = Naming.NameTokens.NameTitleYear(MovieFolderFormat);
+        ShowFolderFormat = Naming.NameTokens.NameTitleYear(ShowFolderFormat);
+    }
+
+    private void SeedKeysFromLocalFile()
+    {
+        try
+        {
+            if (!File.Exists(LocalKeysPath)) return;
+
+            var seed = JsonSerializer.Deserialize<PyreMediaSettings>(
+                File.ReadAllText(LocalKeysPath), JsonOptions);
+
+            if (seed is null) return;
+
+            if (string.IsNullOrWhiteSpace(TmdbApiKey)) TmdbApiKey = seed.TmdbApiKey;
+            if (string.IsNullOrWhiteSpace(TvdbApiKey)) TvdbApiKey = seed.TvdbApiKey;
+            if (string.IsNullOrWhiteSpace(AcoustIdApiKey)) AcoustIdApiKey = seed.AcoustIdApiKey;
+        }
+        catch
+        {
+            // A malformed keys file is not worth stopping the program for. The
+            // keys simply stay empty and the user is asked, which is what would
+            // happen without the file at all.
+        }
+    }
+
     public static PyreMediaSettings Load(string? path = null)
     {
         path ??= DefaultPath;
         LastLoadProblem = null;
 
         if (!File.Exists(path))
-            return new PyreMediaSettings { _origin = path };
+        {
+            var fresh = new PyreMediaSettings { _origin = path };
+            fresh.SeedKeysFromLocalFile();
+            return fresh;
+        }
 
         // The main file first, then the backup written before the last save.
         foreach (var (candidate, label) in new[] { (path, "settings"), (BackupFor(path), "the backup") })
@@ -568,6 +778,8 @@ public sealed class PyreMediaSettings
                     LastLoadProblem = $"Settings were unreadable, so {label} was used instead.";
 
                 loaded._origin = path;
+                loaded.SeedKeysFromLocalFile();
+                loaded.UseNamedPlaceholders();
                 return loaded;
             }
             catch (Exception ex)

@@ -25,11 +25,119 @@ public partial class LibraryItem(MediaItem media) : ObservableObject
 
     public bool HasForeign => Media.HasForeignAudio;
 
+    /// <summary>
+    /// What the file carries, e.g. "6 audio - 25 subs".
+    ///
+    /// Blank until the probe has run and blank when there is nothing to say -
+    /// one audio track and no subtitles is the ordinary case and printing it
+    /// on every row would bury the files that are worth looking at.
+    /// </summary>
+    public string TrackBadge
+    {
+        get
+        {
+            if (!Media.Probed) return "";
+
+            var parts = new List<string>(2);
+
+            // Counts only. The languages used to be here too and did not fit -
+            // on a row carrying a title and a foreign-audio badge as well, it
+            // clipped to "2 audio (hin, e...", which is worse than not saying
+            // it. The row's job is to show there is something here; what it is
+            // is spelt out beside the Remux button, and named in full in the
+            // tooltip.
+            if (Media.AudioTracks > 1) parts.Add($"{Media.AudioTracks} audio");
+
+            if (Media.SubtitleTracks > 0)
+                parts.Add($"{Media.SubtitleTracks} sub{(Media.SubtitleTracks == 1 ? "" : "s")}");
+
+            return string.Join("   ", parts);
+        }
+    }
+
+    /// <summary>
+    /// Every language spelt out, for the tooltip. "spa" is not something most
+    /// people read fluently, and the badge has no room for "Spanish".
+    /// </summary>
+    public string TrackTooltip
+    {
+        get
+        {
+            if (!Media.Probed) return "";
+
+            string Named(List<string> codes) => string.Join(", ", codes
+                .Select(c => c is null or "" or "und" ? "unnamed" : LanguageCatalog.NameOf(c))
+                .Distinct());
+
+            var lines = new List<string>(3);
+
+            if (Media.AudioTracks > 0)
+                lines.Add($"Audio ({Media.AudioTracks}): {Named(Media.AudioLanguages)}");
+
+            if (Media.SubtitleTracks > 0)
+                lines.Add($"Subtitles ({Media.SubtitleTracks}): {Named(Media.SubtitleLanguages)}");
+
+            if (lines.Count == 0) return "";
+
+            lines.Add("Use Remux to drop the ones you'll never play.");
+            return string.Join("\n", lines);
+        }
+    }
+
+    public bool HasTrackBadge => TrackBadge.Length > 0;
+
+    /// <summary>
+    /// The same thing said beside the Remux button, where there is room to say
+    /// it properly.
+    ///
+    /// The badge on the row has to fit a narrow list and gets clipped mid-word
+    /// on a long one - "2 audio (hin, e..." - and it sits nowhere near the
+    /// button that acts on it. Here the languages are spelt out, because "hin"
+    /// is a code most people have to look up, and it reads into the button
+    /// rather than away from it: this is what the file carries, and that is the
+    /// thing that drops what you don't want.
+    /// </summary>
+    public string TrackCallout
+    {
+        get
+        {
+            if (!Media.Probed) return "";
+
+            string Named(List<string> codes)
+            {
+                var names = codes
+                    .Where(c => !string.IsNullOrWhiteSpace(c) && c != "und")
+                    .Select(LanguageCatalog.NameOf)
+                    .Distinct()
+                    .ToList();
+
+                return names.Count == 0 ? "" : $" ({string.Join(", ", names)})";
+            }
+
+            var parts = new List<string>(2);
+
+            if (Media.AudioTracks > 1)
+                parts.Add($"{Media.AudioTracks} audio{Named(Media.AudioLanguages)}");
+
+            if (Media.SubtitleTracks > 0)
+                parts.Add($"{Media.SubtitleTracks} subtitle{(Media.SubtitleTracks == 1 ? "" : "s")}{Named(Media.SubtitleLanguages)}");
+
+            return string.Join("   ", parts);
+        }
+    }
+
+    public bool HasTrackCallout => TrackCallout.Length > 0;
+
     /// <summary>Called after the background probe pass updates this item.</summary>
     public void RefreshProbeState()
     {
         OnPropertyChanged(nameof(ForeignBadge));
         OnPropertyChanged(nameof(HasForeign));
+        OnPropertyChanged(nameof(TrackBadge));
+        OnPropertyChanged(nameof(TrackTooltip));
+        OnPropertyChanged(nameof(HasTrackBadge));
+        OnPropertyChanged(nameof(TrackCallout));
+        OnPropertyChanged(nameof(HasTrackCallout));
     }
 
     /// <summary>Flip the detected kind when auto-detection guessed wrong.</summary>

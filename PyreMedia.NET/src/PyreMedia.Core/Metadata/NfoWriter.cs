@@ -127,6 +127,69 @@ public static class NfoWriter
         return Write(path, show, episodes, info);
     }
 
+    /// <summary>
+    /// The show's own <c>tvshow.nfo</c>, written in the show folder rather than
+    /// beside any one video.
+    ///
+    /// This was simply missing. Every episode got its .nfo and the show got
+    /// none, which is not a cosmetic gap: without it Kodi has nothing to attach
+    /// the series artwork, plot, studio or rating to, and identifies the show by
+    /// scraping the folder name - so a folder it reads differently becomes a
+    /// second, half-empty series sitting beside the real one.
+    /// <para>
+    /// Its path is fixed. Kodi looks for exactly <c>tvshow.nfo</c> in the folder
+    /// holding the season folders, so this takes the show folder rather than a
+    /// video path like the others.
+    /// </para>
+    /// </summary>
+    public static Result WriteShow(string showFolder, TvShow show, PyreMediaSettings settings)
+    {
+        var path = Path.Combine(showFolder, "tvshow.nfo");
+
+        if (!settings.WriteNfoFiles) return new Result(Outcome.SkippedDisabled, path);
+
+        if (!Directory.Exists(showFolder))
+            return new Result(Outcome.Failed, path, "no show folder");
+
+        // Unlike an episode file, this one carries artwork and hand edits that
+        // nothing here can reproduce, and it has no stream details to refresh -
+        // so when it is being preserved there is genuinely nothing to do.
+        if (File.Exists(path) && settings.PreserveExistingNfo && !settings.MergeExistingNfo)
+            return new Result(Outcome.SkippedExisting, path, "already exists");
+
+        var root = new XElement("tvshow",
+            El("title", show.Name),
+            El("originaltitle", show.Name),
+            El("showtitle", show.Name),
+            El("plot", show.Overview),
+            El("premiered", show.FirstAired),
+            El("year", show.Year),
+            El("studio", show.Network));
+
+        // Kodi shows this on the series page and uses it to decide whether a
+        // series is complete. Specials are season 0 and are not counted.
+        var seasons = show.Seasons.Where(s => !s.IsSpecials).ToList();
+
+        if (seasons.Count > 0)
+        {
+            root.Add(El("season", seasons.Count.ToString()));
+            root.Add(El("episode", seasons.Sum(s => s.Episodes.Count).ToString()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(show.Id))
+        {
+            root.Add(new XElement("uniqueid",
+                new XAttribute("type", "tvdb"),
+                new XAttribute("default", "true"),
+                show.Id));
+        }
+
+        var one = new List<XElement> { root };
+        Merge(path, one);
+
+        return Save(path, one[0]);
+    }
+
     private static Result Write(string path, TvShow show, IReadOnlyList<Episode> episodes, MediaInfo? info)
     {
         var blocks = new List<XElement>();

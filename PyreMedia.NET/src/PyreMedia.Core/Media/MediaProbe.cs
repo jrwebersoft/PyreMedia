@@ -26,6 +26,18 @@ public sealed class MediaStream
     public string? ChannelLayout { get; init; }
 
     public long BitRate { get; init; }
+
+    /// <summary>
+    /// How long this stream runs, where the container says. Zero when it does
+    /// not - MKV often reports only the container's figure.
+    ///
+    /// Needed because container duration is the longest stream, so dropping
+    /// that stream shortens the file legitimately. Verifying against the
+    /// container alone called a correct remux truncated: a 2160p film whose
+    /// two Spanish audio tracks ran sixty seconds past the picture came out
+    /// exactly sixty seconds "short" when they were dropped.
+    /// </summary>
+    public double Seconds { get; init; }
     public int SampleRate { get; init; }
     public int Width { get; init; }
     public int Height { get; init; }
@@ -480,6 +492,7 @@ public sealed class MediaProbe(string? ffprobePath = null)
                         Profile = NullIfEmpty(Str(s, "profile")),
                         ChannelLayout = NullIfEmpty(Str(s, "channel_layout")),
                         BitRate = long.TryParse(Str(s, "bit_rate"), out var br) ? br : 0,
+                        Seconds = StreamSeconds(s, tags),
                         SampleRate = int.TryParse(Str(s, "sample_rate"), out var sr) ? sr : 0,
                         Width = s.TryGetProperty("width", out var w) && w.ValueKind == JsonValueKind.Number
                             ? w.GetInt32() : 0,
@@ -623,6 +636,67 @@ public sealed class MediaProbe(string? ffprobePath = null)
 
     private static string NormalizeLang(string lang) =>
         string.IsNullOrWhiteSpace(lang) ? "und" : lang.Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// How long one stream actually runs.
+    ///
+    /// The obvious field is <c>duration</c>, and in Matroska it is very nearly
+    /// useless: it is usually absent, and when it is present it can be the
+    /// container's length rather than the stream's. On a real file every stream
+    /// reported N/A except one subtitle track, which reported the container -
+    /// so the "longest kept stream" came out as the whole container, the check
+    /// expected 92:40 from a film whose picture is 89:58, and a good remux was
+    /// thrown away as truncated. That is the same fault as before wearing a
+    /// different hat: the first two versions measured the container on purpose,
+    /// this one measured it by accident.
+    ///
+    /// Matroska keeps the real figure in a DURATION tag, written per stream as
+    /// <c>01:29:58.518000000</c>. Preferred where it exists, because it is the
+    /// answer to the question actually being asked.
+    /// </summary>
+    private static double StreamSeconds(JsonElement stream, JsonElement tags)
+    {
+        if (tags.ValueKind == JsonValueKind.Object)
+        {
+            // Tag names vary in case between muxers - DURATION, Duration.
+            foreach (var tag in tags.EnumerateObject())
+            {
+                if (!tag.NameEquals("DURATION")
+                    && !string.Equals(tag.Name, "duration", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (TryHms(tag.Value.ValueKind == JsonValueKind.String ? tag.Value.GetString() : null,
+                           out var tagged))
+                    return tagged;
+            }
+        }
+
+        return double.TryParse(Str(stream, "duration"),
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var plain) ? plain : 0;
+    }
+
+    /// <summary>"01:29:58.518000000" as seconds. False for anything else.</summary>
+    private static bool TryHms(string? text, out double seconds)
+    {
+        seconds = 0;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+
+        var parts = text.Split(':');
+        if (parts.Length != 3) return false;
+
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+
+        if (!int.TryParse(parts[0], System.Globalization.NumberStyles.Integer, culture, out var h)
+            || !int.TryParse(parts[1], System.Globalization.NumberStyles.Integer, culture, out var m)
+            || !double.TryParse(parts[2], System.Globalization.NumberStyles.Float, culture, out var s))
+            return false;
+
+        if (h < 0 || m < 0 || s < 0) return false;
+
+        seconds = h * 3600 + m * 60 + s;
+        return true;
+    }
 
     private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
 

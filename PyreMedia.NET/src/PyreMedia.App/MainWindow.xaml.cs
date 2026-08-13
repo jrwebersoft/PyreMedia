@@ -1,4 +1,9 @@
 using System.Collections.Specialized;
+using System.IO;
+using System.Linq;
+using PyreMedia.Core;
+using PyreMedia.Core.History;
+using PyreMedia.Core.Organizing;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -21,6 +26,10 @@ public partial class MainWindow
         FitToWorkArea();
         LogPathText.Text = PyreMedia.Core.AppPaths.Display(AppLog.FilePath);
 
+        // The audio pane keeps its own state but shares the settings file and
+        // the history, so a music run undoes from the same History window.
+        MusicPane.Attach(_vm.Settings, _vm.History);
+
         // The view model finds the collisions; the shell asks about them.
         _vm.ResolveConflicts = conflicts =>
         {
@@ -35,10 +44,24 @@ public partial class MainWindow
 
         // First run: offer setup rather than opening on an empty window whose
         // only guidance is a line in a collapsed log.
+        //
+        // Otherwise scan straight away. Opening on an empty list and waiting to
+        // be asked is a step with no decision in it - there is nothing to
+        // choose, the folders are already configured, and the answer is always
+        // yes. RunSetup does the same scan when setup finishes, so this is the
+        // path for every launch after the first.
         Loaded += (_, _) =>
         {
-            if (_vm.Settings.SetupCompleted) return;
-            RunSetup(firstRun: true);
+            if (!_vm.Settings.SetupCompleted)
+            {
+                RunSetup(firstRun: true);
+                return;
+            }
+
+            if (!_vm.Settings.ScanOnLaunch) return;
+
+            if (_vm.HasFolders && _vm.ScanCommand.CanExecute(null))
+                _vm.ScanCommand.Execute(null);
         };
 
         // Keep the log scrolled to the newest entry.
@@ -47,6 +70,136 @@ public partial class MainWindow
             if (e.Action == NotifyCollectionChangedAction.Add && LogList.Items.Count > 0)
                 LogList.ScrollIntoView(LogList.Items[^1]);
         };
+    }
+
+    /// <summary>
+    /// Move finished films and episodes out of the staging folders into their
+    /// libraries.
+    ///
+    /// What counts as finished is taken from the history rather than from the
+    /// list on screen, and that is deliberate. The video side plans one item at
+    /// a time, so nothing here knows the state of the other three hundred; but
+    /// a file the history records renaming, which is still sitting where it was
+    /// put, has demonstrably been dealt with. It also survives closing the
+    /// program, which a list in memory does not.
+    /// </summary>
+    private void OnMoveCompletedVideo(object sender, RoutedEventArgs e)
+    {
+        var staging = _vm.Settings.TvFolders.Concat(_vm.Settings.MovieFolders)
+            .Where(Directory.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (staging.Count == 0)
+        {
+            System.Windows.MessageBox.Show("No TV or movie folders have been added yet.",
+                "Nothing to move", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var video = _vm.Settings.AllowedFileTypes
+            .Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet();
+
+        // Newest entry per path wins: a file renamed twice is finished at
+        // whatever it is called now, not at what it was called first.
+        var finished = _vm.History.Read()
+            .Where(h => h.Action is HistoryAction.Rename or HistoryAction.Move)
+            .GroupBy(h => h.NewPath, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(h => h.Timestamp).First())
+            .Where(h => video.Contains(Path.GetExtension(h.NewPath).ToLowerInvariant()))
+            .Where(h => File.Exists(h.NewPath))
+            .ToList();
+
+        // Grouped by which staging folder they sit under, because each has its
+        // own library and the layout below it has to be preserved.
+        var byRoot = staging.ToDictionary(
+            root => root,
+            root => finished
+                .Where(h => h.NewPath.StartsWith(
+                    root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(h => h.NewPath)
+                .ToList(),
+            StringComparer.OrdinalIgnoreCase);
+
+        var total = byRoot.Sum(kv => kv.Value.Count);
+
+        if (total == 0)
+        {
+            System.Windows.MessageBox.Show(
+                "Nothing has been renamed yet, so nothing is finished. Rename files first - "
+                + "a file counts as finished once it has been renamed and is still where "
+                + "it was put.",
+                "Nothing to move", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        foreach (var (root, files) in byRoot.Where(kv => kv.Value.Count > 0))
+        {
+            var tv = _vm.Settings.TvFolders.Any(f =>
+                string.Equals(f, root, StringComparison.OrdinalIgnoreCase));
+
+            var kind = tv ? LibraryKind.Tv : LibraryKind.Movie;
+            var destination = _vm.Settings.DestinationFor(kind);
+
+            // Blank means not chosen, not "leave them here". Ask rather than
+            // put somebody's library somewhere they did not pick.
+            if (string.IsNullOrWhiteSpace(destination))
+            {
+                var pick = System.Windows.MessageBox.Show(
+                    $"No {(tv ? "TV" : "movie")} library folder has been chosen yet.\n\n"
+                    + $"{files.Count} finished files are waiting in:\n{root}\n\nChoose where they go?",
+                    "Where should finished files go?", MessageBoxButton.OKCancel,
+                    MessageBoxImage.Information);
+
+                if (pick != MessageBoxResult.OK) continue;
+
+                var dialog = new Microsoft.Win32.OpenFolderDialog
+                {
+                    Title = tv ? "Where your TV library lives" : "Where your movie library lives"
+                };
+
+                if (dialog.ShowDialog() != true) continue;
+
+                destination = dialog.FolderName;
+
+                if (tv) _vm.Settings.TvDestination = destination;
+                else _vm.Settings.MovieDestination = destination;
+
+                _vm.Settings.Save();
+            }
+
+            if (System.Windows.MessageBox.Show(
+                    $"Move {files.Count} finished files to:\n\n{destination}\n\n"
+                    + "Their folder layout is kept as it is now, and this undoes from History.",
+                    "Move completed", MessageBoxButton.OKCancel, MessageBoxImage.Question)
+                != MessageBoxResult.OK) continue;
+
+            var result = CompletedMover.Move(files, root, destination, _vm.History);
+
+            _vm.Log.Add($"Moved {result.Moved} to {destination}, skipped {result.Skipped}, "
+                      + $"failed {result.Failed}. Batch {result.BatchId}.");
+
+            foreach (var error in result.Errors.Take(20)) _vm.Log.Add($"ERROR {error}");
+
+            if (result.EmptyFolders.Count > 0)
+                _vm.Log.Add($"{result.EmptyFolders.Count} folders are now empty - none were removed.");
+        }
+    }
+
+    /// <summary>
+    /// All audio / Music / Audiobooks. Sits beside the pane rather than inside
+    /// it so it lines up with the video tab's filter, which is the point of
+    /// having the same shape on both halves.
+    /// </summary>
+    private void OnAudioFilter(object sender, RoutedEventArgs e)
+    {
+        // Fires while the XAML is still being built, before the pane exists.
+        if (MusicPane is null) return;
+
+        MusicPane.Show((sender as FrameworkElement)?.Tag as string ?? "all");
     }
 
     private bool? _isNarrow;
@@ -419,8 +572,18 @@ public partial class MainWindow
     private void OnOpenSettings(object sender, RoutedEventArgs e)
     {
         var dlg = new SettingsWindow(_vm.Settings) { Owner = this };
+
         if (dlg.ShowDialog() == true)
+        {
             _vm.ReloadServices();
+
+            // The music pattern can be edited in two places, and the audio pane
+            // read its copy when the window opened. Without this, changing it in
+            // Settings appears to work and is then overwritten by the stale copy
+            // the moment the pane saves - which is the whole reason two editors
+            // for one value are usually a mistake.
+            MusicPane.Attach(_vm.Settings, _vm.History);
+        }
     }
 
     private void OnToggleTheme(object sender, RoutedEventArgs e)

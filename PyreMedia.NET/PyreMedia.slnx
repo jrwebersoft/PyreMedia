@@ -2,12 +2,14 @@
   <Folder Name="/src/">
     <Project Path="src/PyreMedia.App/PyreMedia.App.csproj" />
     <Project Path="src/PyreMedia.Core/PyreMedia.Core.csproj" />
+    <Project Path="src/PyreMedia.Tests/PyreMedia.Tests.csproj" />
   </Folder>
   <!--
-    The manual generator builds with everything else on purpose. Left out, a
-    change that breaks it compiles clean and stays broken until somebody goes to
-    rebuild the manual - and it reaches into the app's real windows, so it is
-    exactly the thing a window change breaks.
+    The manual generator builds with everything else on purpose. It was left out,
+    and so a change that broke it compiled clean and stayed broken until somebody
+    went to rebuild the manual. It reaches into the app's real windows, so it is
+    exactly the kind of thing that breaks when a window changes - which is the
+    one moment the manual most needs regenerating.
   -->
   <Folder Name="/tools/">
     <Project Path="tools/ManualBuilder/ManualBuilder.csproj" />
