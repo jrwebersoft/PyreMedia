@@ -244,7 +244,12 @@ internal static class Program
         Shot("main", () => new PyreMedia.App.MainWindow(), 1280, 860, 45, Scanned);
         Shot("main-narrow", () => new PyreMedia.App.MainWindow(), 720, 1000, 45, Scanned);
         Shot("setup", () => new SetupWindow(settings), 900, 700, 6);   // checks for tools
-        Shot("settings", () => new SettingsWindow(settings), 900, 820);
+        // Settings is photographed as a fresh install rather than with the
+        // fixture library loaded. It is the one window that displays folder
+        // paths, and a picture of somebody's folder list is a picture of how
+        // their disk is arranged - which is theirs, not documentation. A blank
+        // canvas is also what a new reader actually sees on opening it.
+        Shot("settings", () => new SettingsWindow(new PyreMediaSettings()), 900, 820);
         Shot("history", () => new HistoryWindow(history), 1180, 700);
         Shot("about", () => new AboutWindow(settings), 900, 780, 6);   // checks for tools
         Shot("conflict", () => new ConflictWindow(SampleConflicts(library)), 900, 640);
