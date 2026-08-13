@@ -52,3 +52,8 @@ PyreMedia-Release-Small/
 # that copying a working build across cannot quietly stage one.
 keys.local.json
 **/keys.local.json
+# Working notes. The public repository carries documentation, not the record of
+# how it got built - and a file of half-finished thoughts is the easiest way for
+# something private to reach it by accident.
+TODO.md
+next.md

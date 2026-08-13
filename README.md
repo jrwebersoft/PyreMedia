@@ -162,8 +162,11 @@ The manual, with screenshots, is generated from the running application:
 Version 1.1.0. TV and film are complete and in daily use. Music library
 support is being built and is not in this release.
 
-Known gaps are kept in `TODO.md` rather than hidden: if something is unproven,
-it says so there.
+Some things are proven further than others. Renaming, conflict handling and
+undo are exercised daily on a large library; remuxing is used regularly but on
+a narrower range of files, and the 3D and Dolby Vision paths have been tried on
+few enough files to be worth calling out. Nothing here deletes anything without
+showing it first, and renames undo from History.
 
 ## Author
 
