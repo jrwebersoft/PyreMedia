@@ -132,28 +132,31 @@ internal static class Program
     {
         var library = Path.Combine(_work, "Library");
 
-        var firefly = Path.Combine(library, "firefly", "Season 01");
-        Directory.CreateDirectory(firefly);
+        // Public domain throughout, titles included. These pictures go into a
+        // manual that gets published, and there is no reason for it to carry
+        // other people's films even as filenames.
+        var show = Path.Combine(library, "cisco kid", "Season 01");
+        Directory.CreateDirectory(show);
 
         foreach (var (n, _) in new[]
                  {
-                     ("Firefly.S01E01.720p.BluRay.x264-GROUP.mkv", 0),
-                     ("Firefly.S01E02.720p.BluRay.x264-GROUP.mkv", 0),
-                     ("Firefly.S01E03.720p.BluRay.x264-GROUP.mkv", 0),
-                     ("Firefly.S01E04.720p.BluRay.x264-GROUP.mkv", 0),
+                     ("The.Cisco.Kid.S01E01.480p.WEB.x264-GROUP.mkv", 0),
+                     ("The.Cisco.Kid.S01E02.480p.WEB.x264-GROUP.mkv", 0),
+                     ("The.Cisco.Kid.S01E03.480p.WEB.x264-GROUP.mkv", 0),
+                     ("The.Cisco.Kid.S01E04.480p.WEB.x264-GROUP.mkv", 0),
                  })
-            File.WriteAllText(Path.Combine(firefly, n), "");
+            File.WriteAllText(Path.Combine(show, n), "");
 
-        File.WriteAllText(Path.Combine(firefly, "Firefly.S01E01.720p.BluRay.x264-GROUP.eng.srt"), "");
+        File.WriteAllText(Path.Combine(show, "The.Cisco.Kid.S01E01.480p.WEB.x264-GROUP.eng.srt"), "");
 
         var movies = Path.Combine(library, "Movies");
         Directory.CreateDirectory(movies);
 
         foreach (var n in new[]
                  {
-                     "The.Matrix.1999.1080p.BluRay.x264.mkv",
-                     "Blade Runner 2049 (2017) 2160p HDR.mkv",
-                     "arrival.2016.mkv",
+                     "Night.of.the.Living.Dead.1968.1080p.BluRay.x264.mkv",
+                     "Metropolis (1927) 2160p HDR.mkv",
+                     "nosferatu.1922.mkv",
                  })
             File.WriteAllText(Path.Combine(movies, n), "");
 
@@ -249,7 +252,7 @@ internal static class Program
         Shot("remux", () =>
         {
             var files = Directory.GetFiles(library, "*.mkv", SearchOption.AllDirectories).Take(4).ToList();
-            return new RemuxWindow(settings, history, files, "Firefly");
+            return new RemuxWindow(settings, history, files, "The Cisco Kid");
         }, 1100, 800, 4);
 
         return shots;
@@ -258,21 +261,21 @@ internal static class Program
     private static RenameHistory SampleHistory(string library)
     {
         var h = new RenameHistory();
-        var season = Path.Combine(library, "firefly", "Season 01");
+        var season = Path.Combine(library, "cisco kid", "Season 01");
 
         var batch = "a1b2c3d4";
         for (var i = 1; i <= 4; i++)
         {
             h.Add(HistoryAction.Rename,
-                  Path.Combine(season, $"Firefly.S01E0{i}.720p.BluRay.x264-GROUP.mkv"),
-                  Path.Combine(season, $"Firefly 01x0{i} Episode {i}.mkv"),
-                  "Firefly", "78874", batch);
+                  Path.Combine(season, $"The.Cisco.Kid.S01E0{i}.480p.WEB.x264-GROUP.mkv"),
+                  Path.Combine(season, $"The Cisco Kid 01x0{i} Episode {i}.mkv"),
+                  "The Cisco Kid", "72004", batch);
         }
 
         h.Add(HistoryAction.FolderRename,
-              Path.Combine(library, "firefly"),
-              Path.Combine(library, "Firefly (2002)"),
-              "Firefly", "78874", batch);
+              Path.Combine(library, "cisco kid"),
+              Path.Combine(library, "The Cisco Kid (1950)"),
+              "The Cisco Kid", "72004", batch);
 
         return h;
     }
@@ -280,14 +283,14 @@ internal static class Program
     private static List<FileConflict> SampleConflicts(string library)
     {
         var movies = Path.Combine(library, "Movies");
-        var existing = Path.Combine(movies, "The Matrix (1999).mkv");
+        var existing = Path.Combine(movies, "Night of the Living Dead (1968).mkv");
         File.WriteAllText(existing, "");
 
         return
         [
             new FileConflict
             {
-                SourcePath = Path.Combine(movies, "The.Matrix.1999.1080p.BluRay.x264.mkv"),
+                SourcePath = Path.Combine(movies, "Night.of.the.Living.Dead.1968.1080p.BluRay.x264.mkv"),
                 TargetPath = existing
             }
         ];
