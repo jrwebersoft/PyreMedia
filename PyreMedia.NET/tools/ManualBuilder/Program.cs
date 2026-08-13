@@ -42,7 +42,19 @@ internal static class Program
         Console.WriteLine("is hidden or off the desktop. Run this when the machine is free.");
         Console.WriteLine();
 
-        _work = Path.Combine(Path.GetTempPath(), "pyremedia-manual");
+        // Not the temp folder. Every path under it carries the account name -
+        // "C:\Users\someone\AppData\Local\Temp\..." - and the settings window
+        // photographed for this manual shows its media folders, so the account
+        // name went into a picture, into the repository, and would have gone
+        // out with the published build. Text searches never found it because it
+        // was pixels.
+        //
+        // ProgramData has no user in the path. If it cannot be written the run
+        // stops rather than quietly falling back to somewhere that can, because
+        // the fallback is exactly the thing being avoided.
+        _work = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "PyreMedia-Manual");
         _shots = Path.Combine(_work, "shots");
 
         if (Directory.Exists(_work)) TryDelete(_work);
@@ -54,6 +66,14 @@ internal static class Program
 
         var app = new PyreMedia.App.App();
         app.InitializeComponent();
+
+        // Every window here is opened, photographed and closed, so between any
+        // two captures there is a moment with no windows open - which is the
+        // condition WPF shuts an application down on by default. When it fires,
+        // every capture after the first fails with "the Application object is
+        // being shut down" and the manual is written with no pictures in it and
+        // no complaint. This tool decides when it is finished.
+        app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         // App.OnStartup does this, but that only runs under Application.Run, and
         // this tool drives the dispatcher itself so as not to launch the real app.
