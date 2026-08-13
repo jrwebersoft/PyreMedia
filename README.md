@@ -159,7 +159,7 @@ The manual, with screenshots, is generated from the running application:
 
 ## Status
 
-Version 1.1.0. TV and film are complete and in daily use. Music library
+Version 1.0.0. TV and film are complete and in daily use. Music library
 support is being built and is not in this release.
 
 Some things are proven further than others. Renaming, conflict handling and
