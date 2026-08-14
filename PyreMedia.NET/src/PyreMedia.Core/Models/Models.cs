@@ -55,6 +55,17 @@ public sealed class Episode
     public string? ProductionCode { get; init; }
 
     /// <summary>
+    /// How long the episode runs, in whole minutes, where the provider says.
+    ///
+    /// Rounded and sometimes absent, so useless for verifying a file. What it is
+    /// good for is telling one disc of a season from another: six consecutive
+    /// runtimes of 23, 21, 22, 21, 20, 21 are a recognisable shape even at
+    /// minute resolution, and knowing which six of a season you are holding is
+    /// the one thing disc order cannot tell you.
+    /// </summary>
+    public int? RuntimeMinutes { get; init; }
+
+    /// <summary>
     /// Which provider supplied this episode.
     ///
     /// Matters because a Kodi media source is scraped by one scraper at a time.

@@ -103,6 +103,16 @@ public partial class SetupWindow
 {
     private readonly PyreMediaSettings _settings;
     private readonly ObservableCollection<ToolRow> _tools = [];
+
+    /// <summary>
+    /// Small numbers read better as words in a sentence, and this one is always
+    /// small - it is how many outside programs the app can use.
+    /// </summary>
+    private static string Spell(int n) => n switch
+    {
+        1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five",
+        6 => "six", 7 => "seven", 8 => "eight", _ => n.ToString()
+    };
     private readonly ObservableCollection<string> _folders = [];
 
     private int _step;
@@ -183,12 +193,16 @@ public partial class SetupWindow
 
         (TxtStepTitle.Text, TxtStepBlurb.Text) = _step switch
         {
+            // Counted rather than written down, because the written-down number
+            // was wrong within a day of a fifth tool being added and nothing
+            // pointed it out. A sentence that says "four" while the list below
+            // shows five undermines every other number in the window.
             0 => ("Tools",
-                  "PyreMedia uses four outside tools, from three projects - ffmpeg and "
-                  + "ffprobe ship together. They aren't bundled here, being separate projects "
-                  + "under their own licences. The first three install from winget; the last "
-                  + "is a single file you only need if a Dolby Vision file has lost its "
-                  + "declaration, and most libraries never will."),
+                  $"PyreMedia uses {Spell(_tools.Count)} outside tools - ffmpeg and ffprobe "
+                  + "ship together. None are bundled here, being separate projects under "
+                  + "their own licences. Most install from winget, from each author's own "
+                  + "package. Only the first two are needed at all: the rest each buy you "
+                  + "one thing, and the window says which."),
             1 => ("Metadata keys",
                   "Where the titles, episode lists and artwork come from. Both services are "
                   + "free; the keys are registered to you rather than shipped with the "

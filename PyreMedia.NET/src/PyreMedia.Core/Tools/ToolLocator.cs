@@ -113,6 +113,20 @@ public static class ToolLocator
             WingetId = null,
             Publisher = "quietvoid - the author of dovi_tool",
             DownloadUrl = PyreMediaSettings.DoviToolUrl
+        },
+        new()
+        {
+            Name = "VLC",
+            Executable = settings.PlayerPath,
+            Need = ToolNeed.Optional,
+            Why = "Plays a file so you can see what it is - the quickest way to tell which "
+                  + "episode a disc rip's title_t00.mkv actually holds.",
+            Without = "Play still works, opening the file however Windows would open it. "
+                      + "What is lost is control: no full screen on request, and no starting "
+                      + "part-way in.",
+            WingetId = "VideoLAN.VLC",
+            Publisher = "VideoLAN - the authors of VLC",
+            DownloadUrl = PyreMediaSettings.VlcUrl
         }
     ];
 

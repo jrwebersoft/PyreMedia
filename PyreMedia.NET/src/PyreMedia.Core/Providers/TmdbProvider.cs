@@ -202,6 +202,9 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
                     Name = Str(e, "name"),
                     Overview = Str(e, "overview"),
                     FirstAired = Str(e, "air_date"),
+                    RuntimeMinutes = e.TryGetProperty("runtime", out var rt)
+                                     && rt.ValueKind == JsonValueKind.Number
+                        ? rt.GetInt32() : null,
                     Source = "TMDb"
                 });
             }

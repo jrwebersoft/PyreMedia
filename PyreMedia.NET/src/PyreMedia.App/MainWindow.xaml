@@ -459,6 +459,14 @@
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                            Visibility="{Binding SelectedItem.HasTrackCallout, Converter={StaticResource BoolToVis}}" />
 
+                            <!-- Watch a few seconds of it. The fastest way to answer "which
+                                 episode is this?" for a disc rip, where the filename says
+                                 nothing and the metadata says less. -->
+                            <ui:Button x:Name="BtnPlay" Content="Play"
+                                       Icon="{ui:SymbolIcon Play24}" Click="OnPlay"
+                                       Appearance="Secondary" Margin="0,0,10,0" Padding="10,3"
+                                       Visibility="{Binding SelectedItem, Converter={StaticResource NullToVis}}" />
+
                             <!-- Scoped to the selected item, so a 100-episode show is one click -->
                             <ui:Button x:Name="BtnItemTracks" Content="{Binding TracksButtonText}"
                                        Icon="{ui:SymbolIcon Wand24}" Click="OnOpenRemuxForItem"

@@ -357,6 +357,22 @@ public sealed class PyreMediaSettings
     public string DoviToolPath { get; set; } = "dovi_tool";
 
     /// <summary>
+    /// The player Play uses. Optional like the rest of the outside tools -
+    /// without one the file opens however Windows would open it.
+    /// </summary>
+    public string PlayerPath { get; set; } = "vlc";
+
+    /// <summary>
+    /// Open a preview full screen.
+    ///
+    /// Off by default. A preview is usually a glance to answer "which episode
+    /// is this", and a window you can dismiss suits that better than one that
+    /// takes the screen - but on a television, or for a proper look at a
+    /// transfer, full screen is the point.
+    /// </summary>
+    public bool PlayFullScreen { get; set; } = false;
+
+    /// <summary>
     /// Use mkvmerge for MKV sources when it's installed. It copies tracks without
     /// decoding, so MVC survives - ffmpeg would silently discard the second view.
     /// </summary>
@@ -421,6 +437,9 @@ public sealed class PyreMediaSettings
     public const string MkvToolNixUrl = "https://mkvtoolnix.download/downloads.html";
     public const string FfmpegUrl = "https://www.gyan.dev/ffmpeg/builds/";
     public const string DoviToolUrl = "https://github.com/quietvoid/dovi_tool/releases";
+
+    /// <summary>VideoLAN's own download page, not a mirror.</summary>
+    public const string VlcUrl = "https://www.videolan.org/vlc/";
 
     [JsonIgnore]
     public string[] JunkExtensionList =>

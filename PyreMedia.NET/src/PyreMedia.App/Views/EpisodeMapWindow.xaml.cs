@@ -95,6 +95,12 @@ public partial class EpisodeMapWindow
     private readonly MediaItem _item;
     private readonly Func<EpisodeSource, CancellationToken, Task<TvShow?>> _refetch;
 
+    /// <summary>
+    /// What was made of a folder of disc titles, when this item is one. Null for
+    /// an ordinary folder, where the filenames carry their own numbering.
+    /// </summary>
+    private readonly PyreMedia.Core.Organizing.RipReading? _rip;
+
     private TvShow _show;
     private bool _loading;
 
@@ -118,7 +124,8 @@ public partial class EpisodeMapWindow
         MediaItem item,
         TvShow show,
         EpisodeSource currentSource,
-        Func<EpisodeSource, CancellationToken, Task<TvShow?>> refetch)
+        Func<EpisodeSource, CancellationToken, Task<TvShow?>> refetch,
+        PyreMedia.Core.Organizing.RipReading? rip = null)
     {
         InitializeComponent();
         DataContext = this;
@@ -127,6 +134,7 @@ public partial class EpisodeMapWindow
         _item = item;
         _show = show;
         _refetch = refetch;
+        _rip = rip;
         ChosenSource = currentSource;
 
         // Through a view, so one season can be worked on at a time without the
@@ -210,8 +218,202 @@ public partial class EpisodeMapWindow
             Rows.Add(row);
         }
 
+        ApplyRipReading();
+
         FillSeasons();
         UpdateSummary();
+    }
+
+    /// <summary>
+    /// Look at the other discs ripped beside this one.
+    ///
+    /// Only file counts, which cost a directory listing each - no probing, no
+    /// network. That is the point: where the sum comes out exactly right the
+    /// arithmetic is unarguable and nothing else needs doing.
+    /// </summary>
+    private PyreMedia.Core.Organizing.SetPlacement CountTheSet(int episodesInSeason)
+    {
+        try
+        {
+            var parent = Directory.GetParent(_item.Path)?.FullName;
+            if (parent is null) return new PyreMedia.Core.Organizing.SetPlacement();
+
+            var folders = new List<PyreMedia.Core.Organizing.DiscFolder>();
+
+            foreach (var dir in Directory.EnumerateDirectories(parent))
+            {
+                var ripped = Directory.EnumerateFiles(dir)
+                    .Where(PyreMedia.Core.Organizing.DiscRip.IsRipped)
+                    .ToList();
+
+                if (ripped.Count < 2) continue;
+
+                folders.Add(new PyreMedia.Core.Organizing.DiscFolder(
+                    dir,
+                    ripped.Count,
+                    PyreMedia.Core.Organizing.DiscSet.NumberIn(Path.GetFileName(dir)),
+                    ripped.Min(f => File.GetLastWriteTimeUtc(f))));
+            }
+
+            return PyreMedia.Core.Organizing.DiscSet.Place(folders, _item.Path, episodesInSeason);
+        }
+        catch (Exception)
+        {
+            // An unreadable sibling folder is not worth failing over - the
+            // runtimes are asked next either way.
+            return new PyreMedia.Core.Organizing.SetPlacement();
+        }
+    }
+
+    /// <summary>
+    /// Number the rows from a disc reading, where the filenames cannot.
+    ///
+    /// "title_t00_new.mkv" parses to nothing, so without this every row on a
+    /// disc rip opens empty and all nine have to be set by hand. The reading
+    /// has already decided which titles are episodes and what order the disc
+    /// puts them in; this lays that over the episode list.
+    ///
+    /// The order is the disc's, which is almost always broadcast order and is
+    /// promised nowhere - so the caution above the grid says so, and every row
+    /// remains a dropdown.
+    /// </summary>
+    private void ApplyRipReading()
+    {
+        if (_rip is null || Rows.Count == 0) return;
+
+        var byFile = Rows.ToDictionary(r => r.File, StringComparer.OrdinalIgnoreCase);
+
+        // Anything the reading set aside starts unticked, with its reason where
+        // the row would otherwise offer an alternative.
+        foreach (var aside in _rip.Ignored)
+        {
+            if (!byFile.TryGetValue(aside.Title.Path, out var row)) continue;
+
+            row.Include = false;
+            row.Alternative = aside.Why;
+        }
+
+        // A catalogued disc names each title outright, so there is nothing to
+        // infer: title five is whichever episode somebody who ripped this same
+        // disc recorded finding at title five.
+        if (_rip.Named is { Count: > 0 } named)
+        {
+            var placed = 0;
+
+            foreach (var title in _rip.Episodes)
+            {
+                if (!named.TryGetValue(title.Index, out var entry)) continue;
+                if (!byFile.TryGetValue(title.Path, out var row)) continue;
+
+                if (Find(entry.Season, entry.Episode) is not { } choice) continue;
+
+                row.Chosen = choice;
+                row.Include = true;
+                placed++;
+            }
+
+            // Only trust it wholesale if it actually covered the disc. A partial
+            // match leaves the rest to the order below rather than half-filling
+            // the grid and calling it done.
+            if (placed >= _rip.Episodes.Count)
+            {
+                RipCaution.Text = _rip.Caution ?? "";
+                RipCautionBox.Visibility = string.IsNullOrWhiteSpace(_rip.Caution)
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+                return;
+            }
+        }
+
+        // The season being worked on, so a disc from the middle of a run lands
+        // on the right one rather than always on season one.
+        var season = _show.Seasons.Where(x => !x.IsSpecials)
+            .OrderBy(x => x.Number)
+            .FirstOrDefault();
+
+        if (season is null) return;
+
+        var episodes = season.Episodes.OrderBy(e => e.Number).ToList();
+
+        // Disc order gives the sequence and not where it starts. Rip disc three
+        // of four and numbering from episode one is wrong by a constant nobody
+        // notices until they try to watch in order.
+        //
+        // Two ways to find that offset, cheapest first. Counting the whole set
+        // needs nothing but the number of files in each sibling folder: if five
+        // discs hold exactly the season's twenty-one episodes between them, the
+        // third starts at episode nine and no measurement can improve on it.
+        // Only when the counting refuses - a title too many, discs missing, one
+        // folder on its own - are the runtimes asked instead.
+        var counted = CountTheSet(episodes.Count);
+        var from = 0;
+        var didPlace = false;
+        string? placementNote = counted.Note;
+
+        if (counted.Certain)
+        {
+            from = counted.Offset;
+            didPlace = true;
+        }
+        else
+        {
+            var byRuntime = PyreMedia.Core.Organizing.DiscPlacement.Find(episodes, _rip.Episodes);
+
+            if (byRuntime.Certain)
+            {
+                from = episodes.FindIndex(e => e.Number == byRuntime.StartsAt!.Number);
+                didPlace = from >= 0;
+                placementNote = byRuntime.Note;
+            }
+            else if (byRuntime.Note is { Length: > 0 })
+            {
+                // Both declined. Say the counting reason, which is the more
+                // concrete of the two, and leave it there.
+                placementNote ??= byRuntime.Note;
+            }
+        }
+
+        if (from < 0 || from >= episodes.Count) { from = 0; didPlace = false; }
+
+        var next = from;
+
+        foreach (var title in _rip.Episodes)
+        {
+            if (next >= episodes.Count) break;
+            if (!byFile.TryGetValue(title.Path, out var row)) continue;
+
+            row.Chosen = Find(episodes[next].SeasonNumber, episodes[next].Number);
+
+            // Ticked only when something actually placed the disc. Where nothing
+            // could - not catalogued, one disc with no set to count against, and
+            // every episode the same length - the numbering below is the disc's
+            // own order starting from episode one, which is a guess wearing the
+            // clothes of an answer. Left unticked, so Apply does nothing until
+            // somebody has decided it is right.
+            row.Include = didPlace;
+            next++;
+        }
+
+        if (!didPlace)
+        {
+            placementNote = "Nothing here could tell which episodes these are. "
+                          + (placementNote ?? "")
+                          + " The order below is the disc's own, which is usually right; the "
+                          + "starting episode is not known. Set the first row, then use Offset to "
+                          + "move the rest with it - and tick the rows once they read correctly. "
+                          + "Play will show you a title if you are unsure.";
+        }
+
+        // Whatever the runtimes did or did not settle is worth saying either
+        // way: placed at episode six is news, and "these could be any of three
+        // discs" is the reason to check before applying.
+        if (placementNote is { Length: > 0 } note)
+            _rip.Caution = string.IsNullOrWhiteSpace(_rip.Caution) ? note : note + " " + _rip.Caution;
+
+        RipCaution.Text = _rip.Caution ?? "";
+        RipCautionBox.Visibility = string.IsNullOrWhiteSpace(_rip.Caution)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
     private EpisodeChoice? Find(int season, int number) =>

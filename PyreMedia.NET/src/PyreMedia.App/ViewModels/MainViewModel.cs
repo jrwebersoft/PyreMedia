@@ -433,6 +433,20 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        // A disc rip has nothing to search with, and saying "no match yet" would
+        // send somebody off editing a search term that was never going to work.
+        // The folder is the disc's volume label and the files are title indices;
+        // neither has ever heard of the show.
+        if (SelectedResult is null && SelectedItem.Media.IsDiscRip
+            && SelectedItem.Media.NameIsDiscLabel && SearchResults.Count == 0)
+        {
+            WaitingHint = $"This is a disc rip: {SelectedItem.Media.Files.Count} titles named "
+                        + "after their position on the disc, in a folder named after the disc "
+                        + "itself. Nothing here says what the show is, so type its name above. "
+                        + "Play will show you a title if you are not sure.";
+            return;
+        }
+
         if (SelectedResult is null)
         {
             WaitingHint = SearchResults.Count == 0

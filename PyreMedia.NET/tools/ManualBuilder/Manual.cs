@@ -144,6 +144,8 @@ internal static class Manual
                 <li><a href="#first-run">First run</a></li>
                 <li><a href="#tour">The main window</a></li>
                 <li><a href="#workflow">Renaming, start to finish</a></li>
+                <li><a href="#play">Looking at a file before you name it</a></li>
+                <li><a href="#rips">Files straight off a disc</a></li>
                 <li><a href="#conflicts">When something is already in the way</a></li>
                 <li><a href="#split">One show spread over several folders</a></li>
                 <li><a href="#renumber">Episodes numbered wrongly</a></li>
@@ -162,6 +164,7 @@ internal static class Manual
                 <li><a href="#narrow">Using it in a narrow window</a></li>
                 <li><a href="#files">Where PyreMedia keeps its own files</a></li>
                 <li><a href="#trouble">When something goes wrong</a></li>
+                <li><a href="#credits">Credits and sources</a></li>
               </ol>
             </nav>
 
@@ -190,7 +193,7 @@ internal static class Manual
 
             {{IMG_SETUP}}
 
-            <p>The two tools are separate projects with their own licences, so
+            <p>The outside tools are separate projects with their own licences, so
             PyreMedia doesn't bundle them - it finds them on your PATH and can install
             them for you through winget, using each project's own package:</p>
 
@@ -208,14 +211,23 @@ internal static class Manual
                   <td>quietvoid</td>
                   <td><em>Optional.</em> Rebuilds a Dolby Vision declaration that a
                       remux into MP4 stripped. Most libraries never need it</td></tr>
+              <tr><td>VLC</td>
+                  <td>VideoLAN</td>
+                  <td><em>Optional.</em> What <strong>Play</strong> opens a file in.
+                      Without it a file still plays - Windows opens it however it
+                      normally would - but full screen cannot be asked for</td></tr>
             </table>
 
             <div class="note">
               <p>Renaming works without any of them. They are only needed for reading
               track details and for remuxing.</p>
-              <p>The first three install through winget from the authors' own packages.
-              <code>dovi_tool</code> has no winget package, so it is a single executable
-              downloaded from its author's releases and pointed at in Settings.</p>
+              <p>ffmpeg, mkvmerge and VLC install through winget from the authors' own
+              packages - <code>Gyan.FFmpeg</code>, <code>MoritzBunkus.MKVToolNix</code>
+              and <code>VideoLAN.VLC</code>. Never a community repackage: an installer
+              nobody named is not one worth running.</p>
+              <p><code>dovi_tool</code> has no winget package, so it is a single
+              executable downloaded from its author's releases and pointed at in
+              Settings.</p>
             </div>
 
             <h2 id="tour">The main window</h2>
@@ -257,7 +269,13 @@ internal static class Manual
               <em>contains</em> your shows and films, not at one show. Adding the same
               folder twice, or a folder inside one you already added, is detected and
               ignored.</li>
-              <li><strong>Scan.</strong> Everything found appears in the Library list.</li>
+              <li><strong>Scan.</strong> Everything found appears in the Library list.
+              This also happens by itself when the window opens, so after the first run
+              the list is usually already there - waiting to be told to look at folders
+              you have already chosen is a step with no decision in it. Turn it off under
+              Settings &rarr; Video if your library sits on a drive that has to spin up or
+              a share that has to reconnect. Scanning only reads: nothing is proposed
+              until you pick a match, and nothing happens until Apply.</li>
               <li><strong>Pick an item.</strong> PyreMedia searches for it and picks
               a confident match on its own. If it got it wrong, search again in the
               Match box - a year helps a great deal with remakes.</li>
@@ -272,6 +290,115 @@ internal static class Manual
               the next unfinished item after each Apply. With it on you can work
               through a whole folder without touching the Library list.</p>
             </div>
+
+            <h2 id="play">Looking at a file before you name it</h2>
+
+            <p><strong>Play</strong> opens the selected item in a media player. It sounds
+            slight and it is the fastest answer to the question a disc rip always
+            raises: a file called <code>title_t00_new.mkv</code> tells you nothing, its
+            metadata tells you less, and ten seconds of watching settles it.</p>
+
+            <p>It opens at the beginning, in a window. Full screen instead is a setting,
+            under Video.</p>
+
+            <p>It hands the file to a player rather than playing it here. That is
+            deliberate: the playback built into Windows will not open Matroska, HEVC,
+            DTS or TrueHD without extra codecs, which is to say it will not open most of
+            a ripped library - and a preview that fails on exactly those files would look
+            like the files were broken. With <a href="https://www.videolan.org/vlc/">VLC</a>
+            installed, PyreMedia can also ask for full screen; without it the file opens
+            however Windows would open it, and full screen is not available because
+            Windows offers no way to ask for it.</p>
+
+            <h2 id="rips">Files straight off a disc</h2>
+
+            <p>MakeMKV names what it rips after the disc's label and the title's position
+            on it - <code>title_t00_new.mkv</code> in a folder called
+            <code>MX2-0N-NW2_DES</code>. Neither has ever heard of the show. A Blu-ray
+            holds playlists, and which playlist is episode three is written down nowhere
+            on the disc.</p>
+
+            <p>So a rip is recognised as one and treated differently. The row says
+            <em>9 titles from a disc</em>, and no search term is invented from a volume
+            label - asking a provider about <code>MX2-0N-NW2_DES</code> is not a poor
+            guess, it is a guess that cannot succeed. Type the show's name; use
+            <a href="#play">Play</a> if you are not sure what you ripped.</p>
+
+            <p>Once a show is chosen, <strong>Renumber</strong> opens already filled in.
+            Getting there means measuring the disc:</p>
+
+            <ul>
+              <li><strong>Extras are set aside.</strong> A title far shorter than the
+              others is a trailer or a menu loop; one far longer is the "play all", which
+              every TV disc offers and nobody wants as a file.</li>
+              <li><strong>The same episode offered twice is reduced to once.</strong>
+              Discs commonly carry a chaptered playlist for the menu and a plain one for
+              the "play all" to string together. The one with chapter marks is kept.</li>
+              <li><strong>What remains is numbered in the disc's own order</strong>, which
+              is almost always broadcast order.</li>
+            </ul>
+
+            <div class="warn">
+              <p><strong>Almost always is not always, and the disc does not say.</strong>
+              A wrongly numbered rip looks completely correct afterwards - the files play,
+              the names read properly - and the mistake surfaces weeks later when episode
+              four turns out to be episode five. The caution above the grid says as much,
+              and every row is still a dropdown. Check the first and the last against the
+              episode list before applying.</p>
+            </div>
+
+            <h3>When it cannot tell, it does not pretend</h3>
+
+            <p>Disc order gives the sequence, not where it starts. Rip disc three of four
+            and numbering from episode one is wrong by a constant - the files play, the
+            names read properly, and nobody notices until they sit down to watch in
+            order. Three things can supply the missing offset, and they are tried
+            cheapest first:</p>
+
+            <ol>
+              <li><strong>The rest of the set.</strong> If five ripped folders hold exactly
+              the season's twenty-one episodes between them, the third starts at episode
+              nine. This costs nothing but a directory listing, and where the total is
+              exact it is not a guess at all. One title too many means an extra was
+              ripped and counting cannot say which - so it is refused rather than
+              fudged.</li>
+              <li><strong>The runtimes.</strong> A season is rarely uniform, and a run of
+              five consecutive lengths is a recognisable shape even at the whole minutes
+              providers publish. Sliding the disc's own durations along the season finds
+              where they fit.</li>
+              <li><strong>The catalogue.</strong> Where the disc is in TheDiscDb, its
+              titles are named outright rather than placed.</li>
+            </ol>
+
+            <p>When none of them can answer - the disc is not catalogued, it is the only
+            one ripped so there is no set to count, and every episode runs to the same
+            broadcast slot so the runtimes say nothing - <strong>the rows are left
+            unticked</strong>. The numbering shown is the disc's own order starting from
+            episode one, which is a guess wearing the clothes of an answer, and Apply does
+            nothing until you have ticked the rows yourself.</p>
+
+            <p>Set the first row, use <em>Offset</em> to move the rest with it, and tick
+            them once they read correctly. <a href="#play">Play</a> will show you a title
+            if you are unsure which episode you are looking at.</p>
+
+            <h3>Why length alone is not enough</h3>
+
+            <p>Two titles of the same length look like the same episode offered twice, and
+            sometimes are. Measured on a real DVD rip of an animated series: nine
+            episodes running 21:17 to 21:22, two of them identical to the tenth of a
+            second, file sizes within half a percent of each other. Television is cut to a
+            broadcast slot, so of course they match. Treating equal length as equal
+            content would have called seven of those nine duplicates and thrown them
+            away.</p>
+
+            <p>So length only nominates a pair, and their audio decides - the same
+            acoustic fingerprint the music side uses, because whether two files are the
+            same recording is one question whether it is asked of a song or an episode.
+            Fingerprinted, those identical-length episodes diverge immediately.</p>
+
+            <p>Without ffmpeg nothing can hear them, and then both titles are kept and the
+            reading says why. A duplicate left in place wastes disk; an episode discarded
+            is gone.</p>
 
             <h2 id="conflicts">When something is already in the way</h2>
 
@@ -917,6 +1044,11 @@ internal static class Manual
               <tr><td>Send deletions to the Recycle Bin</td>
                   <td>On by default. A caution appears if any of your folders sit on a
                       drive where Windows won't honour it.</td></tr>
+              <tr><td>Scan when the window opens</td>
+                  <td>On. Saves pressing Scan every time. Reading is all it does.</td></tr>
+              <tr><td>Play previews full screen</td>
+                  <td>Off. A preview is usually a glance to settle which episode a file
+                      is; full screen suits a proper look at a transfer. Needs VLC.</td></tr>
               <tr><td>Libraries</td>
                   <td>Where <em>Move completed</em> sends finished files. Four separate
                       folders, because they are not interchangeable - Kodi scans films
@@ -1035,6 +1167,89 @@ internal static class Manual
 
             <p>About also lists every source and dependency, with links - what the data
             comes from, what the tools are, and who wrote them.</p>
+
+                        <h2 id="credits">Credits and sources</h2>
+
+            <p>PyreMedia does very little on its own. What follows is what it stands on,
+            named so the sources are not taken on trust.</p>
+
+            <h3>Programs it runs</h3>
+
+            <p>None are bundled. Each is a separate project under its own licence, and
+            PyreMedia finds it on your PATH and offers to install it from the author's
+            own package - never a community repackage, because an installer nobody
+            named is not one worth running.</p>
+
+            <table>
+              <tr><th>Tool</th><th>By</th><th>Licence</th><th>Where it comes from</th></tr>
+              <tr><td>FFmpeg (<code>ffmpeg</code>, <code>ffprobe</code>)</td>
+                  <td>The FFmpeg project; Windows builds by Gyan Doshi, one of the two
+                      builders <a href="https://ffmpeg.org/download.html">ffmpeg.org</a>
+                      links to</td>
+                  <td>LGPL-2.1 / GPL, depending on build</td>
+                  <td><a href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev</a> ·
+                      winget <code>Gyan.FFmpeg</code></td></tr>
+              <tr><td>MKVToolNix (<code>mkvmerge</code>)</td>
+                  <td>Moritz Bunkus</td>
+                  <td>GPL-2.0</td>
+                  <td><a href="https://mkvtoolnix.download/">mkvtoolnix.download</a> ·
+                      winget <code>MoritzBunkus.MKVToolNix</code></td></tr>
+              <tr><td>VLC</td>
+                  <td>VideoLAN</td>
+                  <td>GPL-2.0</td>
+                  <td><a href="https://www.videolan.org/vlc/">videolan.org</a> ·
+                      winget <code>VideoLAN.VLC</code></td></tr>
+              <tr><td><code>dovi_tool</code></td>
+                  <td>quietvoid</td>
+                  <td>MIT</td>
+                  <td><a href="https://github.com/quietvoid/dovi_tool/releases">its own
+                      releases</a> - no winget package exists</td></tr>
+            </table>
+
+            <h3>Where the information comes from</h3>
+
+            <table>
+              <tr><th>Source</th><th>Used for</th><th>Key needed</th></tr>
+              <tr><td><a href="https://www.themoviedb.org/">TMDb</a></td>
+                  <td>Searching, film metadata, artwork, the episode spine</td>
+                  <td>Yes - free</td></tr>
+              <tr><td><a href="https://thetvdb.com/">TheTVDB</a></td>
+                  <td>Episode data, especially season-0 specials TMDb omits</td>
+                  <td>Yes - free</td></tr>
+              <tr><td><a href="https://www.tvmaze.com/">TVmaze</a></td>
+                  <td>A third opinion on episode numbering</td>
+                  <td>No</td></tr>
+              <tr><td><a href="https://musicbrainz.org/">MusicBrainz</a></td>
+                  <td>Album and recording data for music</td>
+                  <td>No</td></tr>
+              <tr><td><a href="https://acoustid.org/">AcoustID</a></td>
+                  <td>Identifying music whose tags say nothing at all</td>
+                  <td>Yes - free, and optional</td></tr>
+              <tr><td><a href="https://fanart.tv/">fanart.tv</a></td>
+                  <td>Not queried. Listed because artwork URLs in existing Kodi
+                      <code>.nfo</code> files often point there, and those files are
+                      read and preserved</td>
+                  <td>No</td></tr>
+            </table>
+
+            <p>Acoustic fingerprints are made with <a
+            href="https://acoustid.org/chromaprint">Chromaprint</a>, which ships inside
+            ffmpeg. Comparing two files locally needs no account and no network; only
+            asking AcoustID what a recording <em>is</em> reaches out, and that sends a
+            fingerprint and a duration - not the audio, not the filename, not the
+            path.</p>
+
+            <div class="note">
+              <p>TMDb requires this to be said, and it is true of the others as well:
+              this product uses the TMDb API but is not endorsed or certified by TMDb.</p>
+            </div>
+
+            <h3>What PyreMedia is</h3>
+
+            <p>Written from scratch on .NET 10 - the engine, the interface, the
+            providers, the remux pipeline and the metadata handling. It is not a fork, a
+            port or a repackaging of anything. It was inspired by MediaScout 3.x, a
+            Windows renamer unmaintained for years, and shares no code with it.</p>
 
             <footer>
               <p>PyreMedia 4. This manual is generated from the running application:

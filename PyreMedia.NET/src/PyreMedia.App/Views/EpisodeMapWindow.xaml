@@ -109,8 +109,21 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" x:Name="TxtSummary" Margin="14,12,14,8"
-                           FontWeight="SemiBold" TextWrapping="Wrap" />
+                <StackPanel Grid.Row="0">
+                    <TextBlock x:Name="TxtSummary" Margin="14,12,14,8"
+                               FontWeight="SemiBold" TextWrapping="Wrap" />
+
+                    <!-- What a disc could not tell us. Above the grid rather
+                         than in a tooltip, because a wrongly numbered rip looks
+                         entirely correct afterwards - the files play, the names
+                         read properly, and the mistake surfaces weeks later. -->
+                    <Border x:Name="RipCautionBox" Visibility="Collapsed"
+                            Margin="14,0,14,10" Padding="12,8" CornerRadius="6"
+                            Background="{DynamicResource SystemFillColorCautionBackgroundBrush}">
+                        <TextBlock x:Name="RipCaution" TextWrapping="Wrap" FontSize="12"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                    </Border>
+                </StackPanel>
 
                 <DataGrid Grid.Row="1" x:Name="Grid" AutoGenerateColumns="False"
                           CanUserAddRows="False" HeadersVisibility="Column"

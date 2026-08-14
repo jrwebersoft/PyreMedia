@@ -2448,6 +2448,262 @@ Console.WriteLine("\n=== the forced flag is the plan's to decide ===");
         !cleared.IsForced(plain) && !cleared.IsForced(marked));
 }
 
+Console.WriteLine("\n=== reading a disc rip ===");
+{
+    // MakeMKV names its output after the disc label and the title index,
+    // because that is all it knows: a Blu-ray holds playlists, and which
+    // playlist is episode three is written down nowhere on the disc.
+    RipTitle T(int i, double mins, int chapters = 5, long gb = 5) =>
+        new($@"C:\rip\30 Rock_t{i:00}.mkv", i, mins * 60, chapters, gb * 1_000_000_000);
+
+    Check("a folder of _t00 files is recognised as a rip",
+        DiscRip.LooksLikeARip([@"C:\rip\Show_t00.mkv", @"C:\rip\Show_t01.mkv"]));
+
+    Check("one such file is not - that is a film, and there is nothing to work out",
+        !DiscRip.LooksLikeARip([@"C:\rip\Film_t00.mkv"]));
+
+    Check("the title index is read from the name", DiscRip.IndexOf(@"C:\rip\Show_t07.mkv") == 7);
+
+    // The real folder name from a MakeMKV rip of an animated series. It names
+    // the disc, not the show, and no provider will ever match it.
+    Check("a volume label is recognised as one", DiscRip.LooksLikeADiscLabel("MX2-0N-NW2_DES"));
+    Check("and so is the other common shape", DiscRip.LooksLikeADiscLabel("SEASON_1_DISC_2"));
+
+    Check("a real title is not", !DiscRip.LooksLikeADiscLabel("The Cisco Kid (1950)"));
+    Check("nor is one written in capitals", !DiscRip.LooksLikeADiscLabel("TENET"));
+    Check("nor one with a year in it", !DiscRip.LooksLikeADiscLabel("Metropolis 1927"));
+
+    // An ordinary TV disc: four episodes, a trailer, and the "play all".
+    var ordinary = DiscRip.Read([
+        T(0, 22.0), T(1, 21.4), T(2, 21.6), T(3, 21.7),
+        T(4, 2.5, chapters: 0, gb: 1),            // trailer
+        T(5, 86.7, chapters: 20, gb: 20),         // play all
+    ]);
+
+    Check("the four episodes are kept", ordinary.Episodes.Count == 4);
+
+    Check("the trailer is set aside as too short",
+        ordinary.Ignored.Any(i => i.Title.Index == 4 && i.Why.Contains("too short")));
+
+    Check("the play-all is recognised for what it is",
+        ordinary.Ignored.Any(i => i.Title.Index == 5 && i.Why.Contains("joined together")));
+
+    Check("and they come back in disc order",
+        ordinary.Episodes.Select(e => e.Index).SequenceEqual([0, 1, 2, 3]));
+
+    Check("with a caution, because disc order is not promised anywhere",
+        ordinary.Certainty == RipCertainty.Ordered && ordinary.Caution is not null);
+
+    // The case worth getting right: the same episode offered twice, once with
+    // chapter marks and once without.
+    // Odd index is the chapterless twin of the one before it.
+    bool? Twins(RipTitle a, RipTitle b) => Math.Abs(a.Index - b.Index) == 1
+                                           && Math.Min(a.Index, b.Index) % 2 == 0;
+
+    var twinned = DiscRip.Read([
+        T(0, 22.0, chapters: 6), T(1, 22.0, chapters: 0),
+        T(2, 21.5, chapters: 6), T(3, 21.5, chapters: 0),
+    ], Twins);
+
+    Check("a chapterless twin of the same length is dropped", twinned.Episodes.Count == 2);
+
+    Check("and the copy with chapters is the one kept",
+        twinned.Episodes.All(e => e.Chapters > 0));
+
+    Check("the reason says the disc offers it twice",
+        twinned.Ignored.All(i => i.Why.Contains("offers this episode twice")));
+
+    // The case a real rip exposed. Nine episodes of an animated series, all
+    // 21:17 to 21:22 and two identical to the tenth of a second, because
+    // television is cut to a broadcast slot. Length alone would have called
+    // them copies of each other and thrown seven episodes away.
+    var slotted = DiscRip.Read([
+        T(0, 21.37), T(1, 21.30), T(2, 21.32), T(3, 21.32), T(4, 21.31),
+        T(5, 21.30), T(6, 21.31), T(7, 21.30), T(8, 21.32),
+    ], (_, _) => false);
+
+    Check("episodes of identical length are not mistaken for copies",
+        slotted.Episodes.Count == 9);
+
+    // And with nothing able to hear the audio, they are all still kept - it
+    // says it cannot tell rather than choosing.
+    var deaf = DiscRip.Read([
+        T(0, 21.37), T(1, 21.30), T(2, 21.32), T(3, 21.32),
+    ], (_, _) => null);
+
+    Check("with no way to compare audio, nothing is discarded",
+        deaf.Episodes.Count == 4);
+
+    Check("and it says why it cannot be sure",
+        deaf.Certainty == RipCertainty.NeedsYou && deaf.Caution!.Contains("same length"));
+
+    // A spread this wide means something that is not an episode has been kept,
+    // and numbering in order would number the wrong things.
+    var uneven = DiscRip.Read([T(0, 20.0), T(1, 28.0), T(2, 34.0)]);
+
+    Check("a wide spread of lengths asks rather than guesses",
+        uneven.Certainty == RipCertainty.NeedsYou && uneven.Caution!.Contains("wider spread"));
+
+    // A film rip: one long title and some extras.
+    var film = DiscRip.Read([T(0, 142.0, chapters: 24, gb: 30), T(1, 3.0, chapters: 0, gb: 1)]);
+
+    Check("a single feature is not silently numbered as episode one",
+        film.Certainty == RipCertainty.NeedsYou && film.Caution!.Contains("film"));
+
+    // Nothing measurable is not the same as nothing there.
+    var blind = DiscRip.Read([
+        new(@"C:\rip\Show_t00.mkv", 0, 0, 0, 0),
+        new(@"C:\rip\Show_t01.mkv", 1, 0, 0, 0),
+    ]);
+
+    Check("files with no readable length are reported, not guessed at",
+        blind.Certainty == RipCertainty.NeedsYou && blind.Episodes.Count == 0
+        && blind.Caution!.Contains("ffprobe"));
+}
+
+Console.WriteLine("\n=== which disc of the season is this ===");
+{
+    // The Big Bang Theory season 1, runtimes as TMDb actually publishes them.
+    // Rounded to whole minutes, and varied enough that a run of five is a shape.
+    int[] published = [23, 21, 22, 21, 20, 21, 21, 20, 19, 21, 22, 20, 21, 22, 20, 21, 22];
+
+    List<Episode> Season(int[] runtimes) =>
+        [.. runtimes.Select((r, i) => new Episode
+        {
+            SeasonNumber = 1, Number = i + 1, Name = $"Episode {i + 1}", RuntimeMinutes = r
+        })];
+
+    RipTitle T(int i, double minutes) =>
+        new($@"C:\rip\t{i:00}.mkv", i, minutes * 60, 5, 5_000_000_000);
+
+    var season = Season(published);
+
+    // Disc two: episodes 6 to 10, ripped. Durations are the real thing, so they
+    // sit a little either side of the published minute.
+    var discTwo = new List<RipTitle>
+    {
+        T(0, 21.3), T(1, 21.1), T(2, 20.4), T(3, 19.2), T(4, 21.4)
+    };
+
+    var placed = DiscPlacement.Find(season, discTwo);
+
+    Check("a disc from the middle of a season is placed by its runtimes",
+        placed.Certain && placed.StartsAt!.Number == 6);
+
+    Check("and it says so, since numbering from episode one would be wrong",
+        placed.Note is not null && placed.Note.Contains("6"));
+
+    // The first disc needs no explanation - that is where it would have gone.
+    var discOne = DiscPlacement.Find(season, [T(0, 22.8), T(1, 21.2), T(2, 21.9), T(3, 21.1)]);
+
+    Check("the first disc is placed at episode one", discOne.Certain && discOne.StartsAt!.Number == 1);
+    Check("with nothing to explain", discOne.Note is null);
+
+    // A series cut to a fixed slot has no shape. This is the X-Men case, and
+    // what TVmaze publishes for everything.
+    var flat = DiscPlacement.Find(Season([30, 30, 30, 30, 30, 30, 30, 30]),
+                                  [T(0, 21.3), T(1, 21.3), T(2, 21.3)]);
+
+    Check("a season listed as all one length cannot place anything",
+        !flat.Certain && flat.Note!.Contains("30 minutes"));
+
+    // Runtimes missing entirely.
+    var blind = DiscPlacement.Find(
+        [.. Enumerable.Range(1, 6).Select(n => new Episode
+            { SeasonNumber = 1, Number = n, Name = $"E{n}" })],
+        [T(0, 21.3), T(1, 21.1)]);
+
+    Check("no runtimes means no placement, and it says why",
+        !blind.Certain && blind.Note!.Contains("no runtimes"));
+
+    // Titles that match nothing in the season - wrong season, or a disc of
+    // extras. Better to find nothing than the least bad thing.
+    var wrong = DiscPlacement.Find(season, [T(0, 48.0), T(1, 47.5), T(2, 49.0)]);
+
+    Check("titles matching nothing are not forced into the closest gap",
+        !wrong.Certain && wrong.Note!.Contains("do not match"));
+}
+
+Console.WriteLine("\n=== counting a whole set of discs ===");
+{
+    DiscFolder D(string name, int titles, DateTime? when = null) =>
+        new($@"H:\rips\{name}", titles, DiscSet.NumberIn(name),
+            when ?? new DateTime(2026, 1, 1));
+
+    Check("a disc number in the folder name is read",
+        DiscSet.NumberIn("SEASON_1_DISC_2") == 2 && DiscSet.NumberIn("BUFFY_S3_D4") == 4);
+
+    Check("and a folder without one gives nothing",
+        DiscSet.NumberIn("MX2-0N-NW2_DES") is null);
+
+    Check("a year is not a disc number", DiscSet.NumberIn("METROPOLIS_1927") is null);
+
+    // Twenty-one episodes across five discs: 4, 4, 4, 4, 5. The totals agree,
+    // so the third disc is episodes nine to twelve and nothing had to be
+    // probed or looked up to know it.
+    var set = new[]
+    {
+        D("SEASON_1_DISC_1", 4), D("SEASON_1_DISC_2", 4), D("SEASON_1_DISC_3", 4),
+        D("SEASON_1_DISC_4", 4), D("SEASON_1_DISC_5", 5),
+    };
+
+    var third = DiscSet.Place(set, @"H:\rips\SEASON_1_DISC_3", 21);
+
+    Check("a disc is placed by counting the ones before it",
+        third.Certain && third.Offset == 8 && third.DiscNumber == 3);
+
+    Check("and it says which disc of how many",
+        third.Note!.Contains("disc 3") && third.Note.Contains("episode 9"));
+
+    var first = DiscSet.Place(set, @"H:\rips\SEASON_1_DISC_1", 21);
+    Check("the first disc starts at nothing", first.Certain && first.Offset == 0);
+
+    var last = DiscSet.Place(set, @"H:\rips\SEASON_1_DISC_5", 21);
+    Check("the last starts after all the others", last.Certain && last.Offset == 16);
+
+    // One title too many somewhere. Counting cannot say which disc carries the
+    // extra, so it declines rather than shifting everything by one.
+    var withExtra = new[]
+    {
+        D("SEASON_1_DISC_1", 4), D("SEASON_1_DISC_2", 5), D("SEASON_1_DISC_3", 4),
+        D("SEASON_1_DISC_4", 4), D("SEASON_1_DISC_5", 5),
+    };
+
+    var uncertain = DiscSet.Place(withExtra, @"H:\rips\SEASON_1_DISC_3", 21);
+
+    Check("one extra title anywhere and the arithmetic is refused",
+        !uncertain.Certain && uncertain.Note!.Contains("22 titles"));
+
+    // Discs missing from the set - some episodes are still in the box.
+    var partial = new[] { D("SEASON_1_DISC_1", 4), D("SEASON_1_DISC_2", 4) };
+    var incomplete = DiscSet.Place(partial, @"H:\rips\SEASON_1_DISC_2", 21);
+
+    Check("a set that does not add up says episodes are missing",
+        !incomplete.Certain && incomplete.Note!.Contains("has not been ripped"));
+
+    // One folder on its own is not a set. This is the X-Men case.
+    var alone = DiscSet.Place([D("MX2-0N-NW2_DES", 9)], @"H:\rips\MX2-0N-NW2_DES", 13);
+
+    Check("a single disc cannot be placed by counting",
+        !alone.Certain && alone.Note!.Contains("only ripped disc"));
+
+    // Unnumbered folders fall back to when they were ripped, and say so.
+    var byDate = new[]
+    {
+        D("VOL_A", 4, new DateTime(2026, 1, 3)),
+        D("VOL_B", 4, new DateTime(2026, 1, 1)),
+        D("VOL_C", 5, new DateTime(2026, 1, 2)),
+    };
+
+    var dated = DiscSet.Place(byDate, @"H:\rips\VOL_C", 13);
+
+    Check("unnumbered discs are ordered by when they were ripped",
+        dated.Certain && dated.Offset == 4 && dated.DiscNumber == 2);
+
+    Check("and it admits that is an assumption",
+        dated.Note!.Contains("worked through in order"));
+}
+
 Console.WriteLine($"\n{(failures == 0 ? "all passed" : $"{failures} FAILED")}");
 return failures;
 

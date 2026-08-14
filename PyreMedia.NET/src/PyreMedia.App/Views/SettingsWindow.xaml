@@ -204,6 +204,9 @@
                                 <CheckBox x:Name="ChkMove" Content="Move episodes into season folders" Margin="0,0,0,2" />
                                 <TextBlock Text="On by default - Season 01, Season 02 under each show, which is what Kodi, Plex and Jellyfin expect. It also allows the show's own folder to be renamed, so it arranges a library rather than only renaming inside it. Turn it off to rename files exactly where they sit: correct filenames, no season folders, nothing moved. A scan says so when it finds a show keeping its episodes loose, and as always nothing happens until you have read the plan and pressed Apply."
                                            TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
+                                <CheckBox x:Name="ChkFullScreen" Content="Play previews full screen" Margin="0,0,0,2" />
+                                <TextBlock Text="Off by default: a preview is usually a glance to settle which episode a file is, and a window you can dismiss suits that better than one that takes the screen. Needs VLC or another player - see Dependencies. Without one the file opens however Windows opens it, and Windows offers no way to ask for full screen."
+                                           TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
                                 <CheckBox x:Name="ChkScanOnLaunch" Content="Scan the video folders when the window opens" Margin="0,0,0,2" />
                                 <TextBlock Text="On by default. Scanning only reads - nothing is proposed until you pick a match, and nothing happens until Apply. Turn it off if your folders sit on a drive that has to spin up or a share that has to reconnect."
                                            TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />

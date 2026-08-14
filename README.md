@@ -119,6 +119,40 @@ proposes, change nothing until you say so.
 - Redundant copies are moved to a quarantine folder beside the library, never
   deleted, and all of it undoes from History.
 
+### Makes sense of a disc rip
+
+MakeMKV names what it rips after the disc's label and the title's position on
+it — `title_t00_new.mkv` in a folder called `MX2-0N-NW2_DES`. Neither has ever
+heard of the show, and a Blu-ray records no episode numbers: which playlist is
+episode three is written down nowhere on the disc.
+
+- **Recognised as a rip** rather than searched for under its volume label, which
+  is not a poor guess but a guess that cannot succeed.
+- **Extras are set aside** — a title far shorter than the rest is a trailer, one
+  far longer is the "play all" every TV disc carries.
+- **The same episode offered twice is reduced to once.** Discs commonly hold a
+  chaptered playlist for the menu and a plain one for the "play all" to string
+  together.
+- **Length nominates a duplicate; the audio decides.** Measured on a real DVD
+  rip: nine episodes running 21:17 to 21:22, two identical to the tenth of a
+  second, file sizes within half a percent. Television is cut to a broadcast
+  slot, so equal length proves nothing — treating it as proof would have thrown
+  away seven of those nine.
+
+Which episodes they are is answered three ways, cheapest first: counting a
+complete set of ripped discs against the season's episode count; matching the
+run of durations against the published runtimes to find which disc of the season
+it is; or [TheDiscDb](https://thediscdb.com), where the disc is catalogued.
+
+**When none of them can answer, the rows are left unticked.** The disc's own
+order is still shown, because it is usually right — but nothing is applied until
+you have said so.
+
+### Plays a file so you can see what it is
+
+Ten seconds of watching answers "which episode is this?" faster than anything
+else. Opens in VLC or whatever the system uses; full screen is a setting.
+
 ### Undo
 
 Every rename, move, delete and remux is appended to a history file. Any batch
@@ -201,7 +235,7 @@ The manual, with screenshots, is generated from the running application:
 ## Status
 
 Version 1.0.0 — the first public release, and it contains everything: TV, film,
-music and audiobooks.
+music, audiobooks and disc rips.
 
 Some things are proven further than others. Renaming, conflict handling and
 undo are exercised daily on a large library; remuxing is used regularly but on

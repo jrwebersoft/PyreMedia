@@ -286,6 +286,13 @@ public sealed class MediaInfo
     public required string Path { get; init; }
     public required List<MediaStream> Streams { get; init; }
     public double DurationSeconds { get; init; }
+
+    /// <summary>
+    /// How many chapter marks the file carries. Zero when it has none, which is
+    /// itself informative: of two playlists of the same episode, the one with
+    /// chapters is the one worth keeping.
+    /// </summary>
+    public int Chapters { get; init; }
     public long SizeBytes { get; init; }
 
     /// <summary>Container title tag. Players prefer this over the filename.</summary>
@@ -445,7 +452,11 @@ public sealed class MediaProbe(string? ffprobePath = null)
         var (code, stdout, _) = await RunAsync(
         [
             "-v", "error",
-            "-show_streams", "-show_format",
+            // Chapters cost nothing here and settle a question nothing else
+            // can: a disc often offers the same episode as two playlists, one
+            // with chapter marks and one without, and they are otherwise
+            // identical in length and size.
+            "-show_streams", "-show_format", "-show_chapters",
             "-of", "json",
             file
         ], ct).ConfigureAwait(false);
@@ -537,6 +548,8 @@ public sealed class MediaProbe(string? ffprobePath = null)
                 Path = file,
                 Streams = streams,
                 DurationSeconds = duration,
+                Chapters = root.TryGetProperty("chapters", out var ch)
+                           && ch.ValueKind == JsonValueKind.Array ? ch.GetArrayLength() : 0,
                 SizeBytes = size,
                 ContainerTitle = containerTitle
             };

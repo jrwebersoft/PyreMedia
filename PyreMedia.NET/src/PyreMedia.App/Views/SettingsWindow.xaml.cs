@@ -87,6 +87,7 @@ public partial class SettingsWindow
         ChkRename.IsChecked = _settings.RenameTvFiles;
         ChkMove.IsChecked = _settings.MoveTvFiles;
         ChkCombineSeasons.IsChecked = _settings.CombineSplitSeasons;
+        ChkFullScreen.IsChecked = _settings.PlayFullScreen;
         ChkScanOnLaunch.IsChecked = _settings.ScanOnLaunch;
         ChkOverwrite.IsChecked = _settings.OverwriteFiles;
         ChkAutoSelect.IsChecked = _settings.AutoSelectMatch;
@@ -299,6 +300,7 @@ public partial class SettingsWindow
         _settings.RenameTvFiles = ChkRename.IsChecked == true;
         _settings.MoveTvFiles = ChkMove.IsChecked == true;
         _settings.CombineSplitSeasons = ChkCombineSeasons.IsChecked == true;
+        _settings.PlayFullScreen = ChkFullScreen.IsChecked == true;
         _settings.ScanOnLaunch = ChkScanOnLaunch.IsChecked == true;
         _settings.OverwriteFiles = ChkOverwrite.IsChecked == true;
         _settings.AutoSelectMatch = ChkAutoSelect.IsChecked == true;

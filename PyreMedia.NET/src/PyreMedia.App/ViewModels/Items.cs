@@ -155,6 +155,18 @@ public partial class LibraryItem(MediaItem media) : ObservableObject
         get
         {
             var files = Media.Files.Count == 1 ? "1 file" : $"{Media.Files.Count} files";
+
+            // A disc rip says so on the row, because "9 files" invites you to
+            // wonder why it will not match anything. The reason is that the
+            // filenames are title indices and the folder is a volume label -
+            // which is a thing to be told, not to work out.
+            if (Media.IsDiscRip)
+            {
+                return Media.NameIsDiscLabel
+                    ? $"{Media.Files.Count} titles from a disc · needs a name"
+                    : $"{Media.Files.Count} titles from a disc";
+            }
+
             return Media.IsLooseFile ? $"{files} · loose" : files;
         }
     }

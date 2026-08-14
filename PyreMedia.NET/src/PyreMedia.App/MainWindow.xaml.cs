@@ -416,6 +416,39 @@ public partial class MainWindow
             _vm.AddFolderCommand.Execute(path);
     }
 
+    /// <summary>
+    /// Play the selected item, to see what it actually is.
+    ///
+    /// The fastest answer to "which episode is this?" for a disc rip, where the
+    /// filename is a title index and the metadata is empty. Opens at the
+    /// beginning, full screen if that is the preference.
+    ///
+    /// It hands off to that player rather than embedding one: WPF's MediaElement
+    /// goes through Media Foundation, which on a stock Windows install plays
+    /// neither Matroska nor HEVC nor DTS - which is to say, not the files you
+    /// would most want to look at.
+    /// </summary>
+    private void OnPlay(object sender, RoutedEventArgs e)
+    {
+        if (_vm.SelectedItem is not { } item) return;
+
+        var file = item.Media.MainFile;
+
+        var settings = _vm.Settings;
+
+        if (PyreMedia.Core.Media.Preview.Open(
+                file, settings.PlayerPath, settings.PlayFullScreen) is { } trouble)
+        {
+            System.Windows.MessageBox.Show(this,
+                $"{trouble}\n\n{System.IO.Path.GetFileName(file)}",
+                "Could not play it", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _vm.WriteLog($"Playing {System.IO.Path.GetFileName(file)} - "
+                     + PyreMedia.Core.Media.Preview.Describe(settings.PlayerPath));
+    }
+
     private void OnOpenLog(object sender, RoutedEventArgs e)
     {
         try
@@ -520,15 +553,98 @@ public partial class MainWindow
             return;
         }
 
+        // A disc rip has to be read before the window opens, because the reading
+        // is what fills it in. It costs a probe per title and a fingerprint for
+        // any pair that collide on length, so it happens here rather than during
+        // every scan - and only for the item actually being renumbered.
+        PyreMedia.Core.Organizing.RipReading? rip = null;
+
+        if (item.Media.IsDiscRip)
+        {
+            Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
+
+            try { rip = ReadTheDisc(item.Media, show); }
+            finally { Mouse.OverrideCursor = null; }
+        }
+
         var dlg = new EpisodeMapWindow(
             _vm.Settings, item.Media, show, _vm.CurrentEpisodeSource,
-            (source, ct) => _vm.GetShowFromAsync(search, source, ct))
+            (source, ct) => _vm.GetShowFromAsync(search, source, ct), rip)
         {
             Owner = this
         };
 
         if (dlg.ShowDialog() == true)
             _vm.ApplyOverrides(dlg.Result, dlg.CurrentShow);
+    }
+
+    /// <summary>
+    /// Measure a disc rip's titles and work out which are episodes.
+    ///
+    /// Every title is probed for its length and chapter count, and any pair
+    /// that come out within a few seconds of each other are compared by their
+    /// audio - because length cannot tell "the disc offers this episode twice"
+    /// from "these are two episodes cut to the same broadcast slot", and a real
+    /// rip on hand is nine episodes running 21:17 to 21:22.
+    /// </summary>
+    private PyreMedia.Core.Organizing.RipReading ReadTheDisc(MediaItem media, PyreMedia.Core.Models.TvShow show)
+    {
+        var probe = new PyreMedia.Core.Media.MediaProbe(_vm.Settings.FfprobePath);
+        var titles = new List<PyreMedia.Core.Organizing.RipTitle>();
+
+        foreach (var file in media.Files.Where(PyreMedia.Core.Organizing.DiscRip.IsRipped))
+        {
+            var info = probe.ProbeAsync(file, CancellationToken.None).GetAwaiter().GetResult();
+
+            long size = 0;
+            try { size = new FileInfo(file).Length; } catch (Exception) { }
+
+            titles.Add(new PyreMedia.Core.Organizing.RipTitle(
+                file,
+                PyreMedia.Core.Organizing.DiscRip.IndexOf(file),
+                info?.DurationSeconds ?? 0,
+                info?.Chapters ?? 0,
+                size));
+        }
+
+        // The files may have changed since last time this was opened.
+        PyreMedia.Core.Organizing.DiscFootage.Forget();
+
+        var reading = PyreMedia.Core.Organizing.DiscRip.Read(
+            titles, PyreMedia.Core.Organizing.DiscFootage.Compare);
+
+        _vm.WriteLog($"Disc rip: {reading.Episodes.Count} episode(s), "
+                     + $"{reading.Ignored.Count} title(s) set aside.");
+
+        // Ask the catalogue whether it recognises this disc. Somebody who has
+        // ripped it already may have written down which title held which
+        // episode, which turns an order into names. Fails quietly: no network,
+        // no entry, or a rate limit leaves the local reading standing.
+        try
+        {
+            var match = PyreMedia.Core.Organizing.DiscDb
+                .FindAsync(show.Name, show.Year, reading.Episodes)
+                .GetAwaiter().GetResult();
+
+            if (match is not null)
+            {
+                reading.Named = match.Titles;
+                reading.Certainty = PyreMedia.Core.Organizing.RipCertainty.Named;
+                reading.Caution =
+                    $"Matched \"{match.Disc}\" from {match.Release} in TheDiscDb, which "
+                    + $"accounted for {match.Matched} of {match.OutOf} titles. These are the "
+                    + "episodes somebody who ripped this same disc recorded finding on it, "
+                    + "rather than a guess from the order.";
+
+                _vm.WriteLog($"Disc rip: matched {match.Disc} in TheDiscDb.");
+            }
+        }
+        catch (Exception)
+        {
+            // An improvement on a good answer, never a requirement.
+        }
+
+        return reading;
     }
 
     /// <summary>

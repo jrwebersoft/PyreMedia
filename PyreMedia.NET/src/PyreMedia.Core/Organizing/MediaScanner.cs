@@ -46,6 +46,23 @@ public sealed class MediaItem
     public bool IsLooseFile { get; init; }
 
     /// <summary>
+    /// A folder of titles straight off a disc - "title_t00.mkv" and its
+    /// siblings - rather than named files.
+    ///
+    /// Kept as a fact about the item because everything downstream has to treat
+    /// it differently: there is no title in the filename, the folder is named
+    /// after the disc's volume label rather than the show, and which title is
+    /// which episode is written down nowhere on the disc.
+    /// </summary>
+    public bool IsDiscRip { get; init; }
+
+    /// <summary>
+    /// True when even the folder name is a volume label - "MX2-0N-NW2_DES" -
+    /// so there is nothing here to search a provider with.
+    /// </summary>
+    public bool NameIsDiscLabel { get; init; }
+
+    /// <summary>
     /// The folders this entry was combined from, when several seasons of one
     /// show were sitting side by side. Empty for an ordinary entry.
     /// <para>
@@ -430,6 +447,35 @@ public sealed class MediaScanner(PyreMediaSettings settings)
                 SearchTitle = nfo.Title!,
                 SearchYear = nfo.Year,
                 IsLooseFile = loose,
+                Root = root,
+                Nfo = nfo
+            };
+        }
+
+        // Straight off a disc. Named for the title index, so no episode parse
+        // will ever succeed and no provider search will match the folder.
+        if (DiscRip.LooksLikeARip(videos))
+        {
+            var label = DiscRip.LooksLikeADiscLabel(displayName);
+
+            // A rip of several similar titles is a TV disc; searching it as a
+            // film would ask a provider about a folder of nine episodes.
+            var (ripTerm, ripYear) = label
+                ? ("", (string?)null)
+                : NameFormatter.ParseTvName(displayName, settings.SearchTermFilters);
+
+            return new MediaItem
+            {
+                Path = path,
+                DisplayName = displayName,
+                Kind = MediaKind.TvEpisode,
+                Files = videos,
+                MainFile = main,
+                SearchTitle = ripTerm,
+                SearchYear = ripYear,
+                IsLooseFile = loose,
+                IsDiscRip = true,
+                NameIsDiscLabel = label,
                 Root = root,
                 Nfo = nfo
             };
