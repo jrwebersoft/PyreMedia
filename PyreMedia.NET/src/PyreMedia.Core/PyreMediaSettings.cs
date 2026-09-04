@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PyreMedia.Core;
@@ -43,6 +43,13 @@ public sealed class PyreMediaSettings
     public List<string> MovieFolders { get; set; } = [];
     public List<string> MusicFolders { get; set; } = [];
 
+    /// <summary>Where comics and ebooks are looked for. Separate, because a
+    /// .cbz and an .epub are read by different programs and shelved
+    /// differently - and because somebody may keep only one of the two.</summary>
+    public List<string> ComicFolders { get; set; } = [];
+
+    public List<string> BookFolders { get; set; } = [];
+
     // ---- Where finished media goes ----
     //
     // A staging folder is where things arrive and a library is where they live,
@@ -59,6 +66,8 @@ public sealed class PyreMediaSettings
     public string TvDestination { get; set; } = "";
     public string MusicDestination { get; set; } = "";
     public string AudiobookDestination { get; set; } = "";
+    public string ComicDestination { get; set; } = "";
+    public string EbookDestination { get; set; } = "";
 
     /// <summary>The destination for a kind of library, or "" if none is set.</summary>
     public string DestinationFor(LibraryKind kind) => kind switch
@@ -67,6 +76,8 @@ public sealed class PyreMediaSettings
         LibraryKind.Tv => TvDestination,
         LibraryKind.Music => MusicDestination,
         LibraryKind.Audiobook => AudiobookDestination,
+        LibraryKind.Comic => ComicDestination,
+        LibraryKind.Ebook => EbookDestination,
         _ => ""
     };
 
@@ -85,6 +96,63 @@ public sealed class PyreMediaSettings
     /// "Track 04".
     /// </summary>
     public string AudiobookFormat { get; set; } = "{author}/{book}[ ({year})]/{chapter:000} {chaptertitle}";
+
+    // ---- Comics and ebooks ----
+
+    /// <summary>
+    /// Where a comic goes. See <c>BookNaming</c> for the fields and for what
+    /// the square brackets do.
+    ///
+    /// {publisher} is available here and deliberately not in the ebook pattern:
+    /// comics are collected by imprint and novels are not.
+    /// </summary>
+    public string ComicFileFormat { get; set; } = Books.BookNaming.ComicDefault;
+
+    /// <summary>Where an ebook goes.</summary>
+    public string BookFileFormat { get; set; } = Books.BookNaming.BookDefault;
+
+    /// <summary>
+    /// Open comics and ebooks and ask what they are, rather than guessing from
+    /// their filenames.
+    ///
+    /// On by default and cheap - both are zips with an XML file inside. An EPUB
+    /// knows its own title, author and publisher; a comic's ComicInfo.xml knows
+    /// its series, issue, publisher and usually the exact issue's id at the
+    /// source it was scraped from. Measured over a real library of 29,083 .cbz
+    /// files, a sample of 400 found 396 carrying that metadata. The filename is
+    /// the fallback, not the source.
+    ///
+    /// Turning it off is for a library on a share slow enough that opening every
+    /// archive is the expensive part of a scan.
+    /// </summary>
+    public bool ReadBookMetadata { get; set; } = true;
+
+    // ---- Comic sources ----
+    //
+    // Asked in this order, and the order is by what a question costs rather than
+    // by which database is best. The GCD dump is a local file: free, unlimited,
+    // instant. Metron allows five thousand a day. Comic Vine allows two hundred
+    // an hour. Spending the scarce one first would be the wrong way round.
+
+    /// <summary>
+    /// The Grand Comics Database dump, downloaded from comics.org.
+    ///
+    /// Not bundled and could not be - it is six gigabytes and CC BY-SA 4.0,
+    /// which carries attribution and share-alike obligations. Fetched from its
+    /// own authors, exactly as ffmpeg is.
+    /// </summary>
+    public string GcdDatabasePath { get; set; } = "";
+
+    /// <summary>metron.cloud account. Basic auth, so this is a real password.</summary>
+    public string MetronUser { get; set; } = "";
+
+    public string MetronPassword { get; set; } = "";
+
+    /// <summary>
+    /// Comic Vine key. Free, and non-commercial only - it is revoked for
+    /// commercial use, which suits this program and is worth knowing anyway.
+    /// </summary>
+    public string ComicVineApiKey { get; set; } = "";
 
     /// <summary>
     /// Compare the audio itself when tags and durations cannot separate a copy
@@ -214,6 +282,27 @@ public sealed class PyreMediaSettings
 
     public string AllowedSubtitles { get; set; } = ".sub;.idx;.srt";
 
+    /// <summary>
+    /// Whether a disc image is something to organise.
+    ///
+    /// On: a folder of .iso files is a shelf of films with nothing tidying
+    /// them, and naming and filing one needs nothing more than reading its
+    /// name. Off, they are invisible to the scan exactly as they were.
+    /// </summary>
+    public bool OrganiseDiscImages { get; set; } = true;
+
+    /// <summary>
+    /// Disc images: named and filed, never opened.
+    ///
+    /// Kept apart from the video list rather than added to it, because
+    /// everything downstream of that list assumes it can read the file.
+    /// Remuxing an .iso is not a thing that can happen - mkvmerge cannot write
+    /// one and would not be asked to - and probing one for its tracks reads a
+    /// filesystem, not a stream. So these are scanned, matched, renamed and
+    /// moved like any film, and left out of everything that opens a file.
+    /// </summary>
+    public string DiscImageTypes { get; set; } = ".iso;.img;.mdf;.nrg";
+
     // ---- Cleanup ----
     // On by default, and the word that carries the weight is "offer". Nothing
     // here deletes anything: it adds a row to the preview, ticked, which can be
@@ -230,6 +319,17 @@ public sealed class PyreMediaSettings
     // metadata is checked by content, not extension, because a scraped sidecar
     // and a scene advert share a suffix. And a download marker beside a file
     // still arriving is a file in use rather than a leftover.
+
+    /// <summary>
+    /// Move the selection to the next unfinished item after a successful Apply.
+    ///
+    /// Off. It used to be on and was not a setting at all - a field on the
+    /// window that reset to on every launch - so the item you had just worked
+    /// on left the screen before you could see what happened to it. The .nfo
+    /// and the artwork are written straight after the rename, and the row that
+    /// reports them is the one it had already moved off.
+    /// </summary>
+    public bool AutoAdvanceAfterApply { get; set; }
 
     /// <summary>Offer to delete sample clips (name contains "sample", or tiny beside the feature).</summary>
     public bool DeleteSamples { get; set; } = true;
@@ -282,8 +382,18 @@ public sealed class PyreMediaSettings
     public string KeepSubtitleLanguages { get; set; } = "eng";
 
     /// <summary>
-    /// Keep tracks tagged "und". Many rips don't tag language at all, and
-    /// dropping those would throw away the only audio.
+    /// Keep tracks tagged "und", where nothing else in the file would do.
+    ///
+    /// Many rips do not tag language at all, and dropping those would throw
+    /// away the only audio. That is the whole of the reason - so it applies
+    /// only while it is true. A file that already carries a track in a
+    /// language you asked for has given you what you wanted, and its untagged
+    /// track is a second copy, a commentary or a stray rather than the last
+    /// thing standing between you and a silent film.
+    ///
+    /// Judged per file and per kind: a file can hold English audio and no
+    /// English subtitles, and the untagged subtitle is still worth rescuing
+    /// there.
     /// </summary>
     public bool KeepUndeterminedLanguage { get; set; } = true;
 
@@ -485,6 +595,18 @@ public sealed class PyreMediaSettings
     public Dictionary<string, string> ShowSourceOverrides { get; set; } = [];
 
     /// <summary>
+    /// Comic series a person has matched against a database, keyed by the
+    /// reduced form of the series name.
+    ///
+    /// The same reasoning as the show overrides above: the agreement is the
+    /// valuable part, not the query. Comics are worse for it than television -
+    /// the free source is a six gigabyte download and the others are rationed
+    /// by the hour - so an answer that was agreed to once is kept rather than
+    /// asked for again on every scan.
+    /// </summary>
+    public Dictionary<string, Books.ComicMatch> ComicMatches { get; set; } = [];
+
+    /// <summary>
     /// Episode renumbering, keyed by show id and season - see <see cref="OffsetKey"/>.
     ///
     /// When files were numbered against one source's scheme and the metadata uses
@@ -570,6 +692,12 @@ public sealed class PyreMediaSettings
     /// </summary>
     public string AcoustIdApiKey { get; set; } = "";
 
+    /// <summary>
+    /// Ignored like its siblings. Derived from the key above, so writing it into
+    /// the settings file records an answer that is already there and would go
+    /// stale the moment the key changed.
+    /// </summary>
+    [JsonIgnore]
     public bool HasAcoustIdKey => !string.IsNullOrWhiteSpace(AcoustIdApiKey);
 
     /// <summary>
@@ -587,6 +715,28 @@ public sealed class PyreMediaSettings
     public string[] VideoExtensions =>
         [.. AllowedFileTypes.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(e => e.StartsWith('.') ? e.ToLowerInvariant() : "." + e.ToLowerInvariant())];
+
+    /// <summary>Disc image extensions, whether or not they are being organised.</summary>
+    [JsonIgnore]
+    public string[] DiscImageExtensions =>
+        [.. DiscImageTypes.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(e => e.StartsWith('.') ? e.ToLowerInvariant() : "." + e.ToLowerInvariant())];
+
+    /// <summary>
+    /// Everything the scan should pick up: videos, plus disc images when those
+    /// are being organised.
+    ///
+    /// This is the list for "what files belong to this item". VideoExtensions
+    /// remains the list for "what can I open", and the two are deliberately not
+    /// the same.
+    /// </summary>
+    [JsonIgnore]
+    public string[] ScannedExtensions =>
+        OrganiseDiscImages ? [.. VideoExtensions, .. DiscImageExtensions] : VideoExtensions;
+
+    /// <summary>Whether a path is a disc image - something to file, never to open.</summary>
+    public bool IsDiscImage(string path) =>
+        DiscImageExtensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
     [JsonIgnore]
     public string[] SubtitleExtensions =>
@@ -626,16 +776,41 @@ public sealed class PyreMediaSettings
     /// reset silently stops covering whatever was added last.
     /// </summary>
     /// <param name="keepFolders">
-    /// Keep the scan roots. They are the one thing here the user chose rather
-    /// than accepted, and losing them turns a reset into a re-setup.
+    /// Keep the scan roots and the libraries they file into. They are the one
+    /// thing here the user chose rather than accepted, and losing them turns a
+    /// reset into a re-setup.
+    ///
+    /// Every kind of folder, not only the two for video. This used to carry TV
+    /// and films alone, so answering "yes, keep my folders" still cleared the
+    /// music, comic and ebook roots and all six destinations - and the dialog
+    /// promising they were kept is what stopped anybody checking.
     /// </param>
-    /// <param name="keepApiKeys">Keep any keys entered by hand.</param>
+    /// <param name="keepApiKeys">
+    /// Keep any credential entered by hand: every key, not just the two for
+    /// video metadata.
+    /// </param>
     public void ResetToDefaults(bool keepFolders = true, bool keepApiKeys = true)
     {
         var tv = new List<string>(TvFolders);
         var movies = new List<string>(MovieFolders);
+        var music = new List<string>(MusicFolders);
+        var comics = new List<string>(ComicFolders);
+        var books = new List<string>(BookFolders);
+
+        var movieTo = MovieDestination;
+        var tvTo = TvDestination;
+        var musicTo = MusicDestination;
+        var audiobookTo = AudiobookDestination;
+        var comicTo = ComicDestination;
+        var ebookTo = EbookDestination;
+
         var tmdb = TmdbApiKey;
         var tvdb = TvdbApiKey;
+        var acoustId = AcoustIdApiKey;
+        var comicVine = ComicVineApiKey;
+        var metronUser = MetronUser;
+        var metronPassword = MetronPassword;
+        var gcd = GcdDatabasePath;
 
         var fresh = new PyreMediaSettings();
 
@@ -654,12 +829,27 @@ public sealed class PyreMediaSettings
         {
             TvFolders = tv;
             MovieFolders = movies;
+            MusicFolders = music;
+            ComicFolders = comics;
+            BookFolders = books;
+
+            MovieDestination = movieTo;
+            TvDestination = tvTo;
+            MusicDestination = musicTo;
+            AudiobookDestination = audiobookTo;
+            ComicDestination = comicTo;
+            EbookDestination = ebookTo;
         }
 
         if (keepApiKeys)
         {
             TmdbApiKey = tmdb;
             TvdbApiKey = tvdb;
+            AcoustIdApiKey = acoustId;
+            ComicVineApiKey = comicVine;
+            MetronUser = metronUser;
+            MetronPassword = metronPassword;
+            GcdDatabasePath = gcd;
         }
     }
 
@@ -760,6 +950,13 @@ public sealed class PyreMediaSettings
             if (string.IsNullOrWhiteSpace(TmdbApiKey)) TmdbApiKey = seed.TmdbApiKey;
             if (string.IsNullOrWhiteSpace(TvdbApiKey)) TvdbApiKey = seed.TvdbApiKey;
             if (string.IsNullOrWhiteSpace(AcoustIdApiKey)) AcoustIdApiKey = seed.AcoustIdApiKey;
+
+            // The comic sources travel the same way. Metron's is an account
+            // password rather than a token, which is a reason to keep it out of
+            // the source tree rather than a reason to treat it differently.
+            if (string.IsNullOrWhiteSpace(ComicVineApiKey)) ComicVineApiKey = seed.ComicVineApiKey;
+            if (string.IsNullOrWhiteSpace(MetronUser)) MetronUser = seed.MetronUser;
+            if (string.IsNullOrWhiteSpace(MetronPassword)) MetronPassword = seed.MetronPassword;
         }
         catch
         {

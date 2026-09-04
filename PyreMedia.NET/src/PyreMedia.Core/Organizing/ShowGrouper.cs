@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using PyreMedia.Core.Naming;
 
 namespace PyreMedia.Core.Organizing;
@@ -59,7 +59,12 @@ public static class ShowGrouper
     /// </summary>
     public static List<ShowGroup> Group(IEnumerable<MediaItem> items)
     {
-        var tv = items.Where(i => i.Kind == MediaKind.TvEpisode && !i.IsLooseFile).ToList();
+        // Loose files count. They were excluded outright, which meant a show
+        // sitting half in a folder and half as loose episodes beside it - which
+        // is simply what a part-collected show looks like - could never be seen
+        // as one thing. Five loose episodes of The Ghost in the Shell and a
+        // folder of the same show were six separate entries to match.
+        var tv = items.Where(i => i.Kind == MediaKind.TvEpisode).ToList();
 
         var byTitle = tv
             .GroupBy(i => Normalize(i.SearchTitle), StringComparer.Ordinal)
@@ -100,18 +105,27 @@ public static class ShowGrouper
         var groups = Group(items).Where(g => g.Caution is null).ToList();
         if (groups.Count == 0) return [.. items];
 
-        var absorbed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The entries themselves, not their paths.
+        //
+        // A loose file's Path is the scan root it was found in, so every loose
+        // file in a library shares one. Keyed on Path, absorbing a single loose
+        // entry into a group marked the root as taken and silently dropped
+        // every other loose file from the library - a lone episode of Lanterns
+        // vanished because an unrelated run of Ghost in the Shell episodes had
+        // been combined. Reference identity is what "this entry was absorbed"
+        // actually means.
+        var absorbed = new HashSet<MediaItem>();
         var result = new List<MediaItem>();
 
         foreach (var g in groups)
         {
-            foreach (var i in g.Items) absorbed.Add(i.Path);
+            foreach (var i in g.Items) absorbed.Add(i);
             combined.Add(g);
         }
 
         // Keep everything that wasn't absorbed, in the order it came.
         foreach (var i in items)
-            if (!absorbed.Contains(i.Path))
+            if (!absorbed.Contains(i))
                 result.Add(i);
 
         foreach (var g in groups)
@@ -130,8 +144,12 @@ public static class ShowGrouper
 
         // The folder they all sit in. Not the show's own folder - which is why a
         // combined entry never has its containing folder renamed.
+        //
+        // A loose file's Path is already that folder - the scan root it was
+        // found in - so taking its directory would climb one above the library
+        // and make that the parent of everything.
         var parent = g.Items
-            .Select(i => Path.GetDirectoryName(i.Path) ?? i.Path)
+            .Select(i => i.IsLooseFile ? i.Path : Path.GetDirectoryName(i.Path) ?? i.Path)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(p => p.Length)
             .First();
@@ -148,7 +166,11 @@ public static class ShowGrouper
             SearchYear = g.Year,
             MainFile = files.FirstOrDefault() ?? first.MainFile,
             IsLooseFile = false,
-            CombinedFrom = [.. g.Items.Select(i => i.Path)],
+            // Release folders only. A loose file has none - its Path is the
+            // scan root - and this list is what the leftover sweep walks, so
+            // putting the root in it would have it enumerate the whole library
+            // looking for junk to delete.
+            CombinedFrom = [.. g.Items.Where(i => !i.IsLooseFile).Select(i => i.Path)],
             Root = first.Root,
 
             // Any one of them will do - they are the same show, and an id from a
@@ -199,23 +221,34 @@ public static class ShowGrouper
             .Order()
             .ToList();
 
-        // The same season twice under one title is either a duplicate or two
+        // The same EPISODE twice under one title is either a duplicate or two
         // different shows. Either way it wants human eyes, not a silent merge.
+        //
+        // Sharing a season number is not that, and testing for it refused the
+        // ordinary case: a season arrives one episode at a time, a release per
+        // folder, so two folders of the same show both saying "season 1" is
+        // what a part-collected season looks like. Two Lanterns folders holding
+        // 01x01 and 01x02 were held apart on the grounds that both were season
+        // one - which was the whole reason they belonged together.
         var repeated = members
-            .SelectMany(m => SeasonsIn(m).Distinct().Select(s => (Item: m, Season: s)))
-            .GroupBy(x => x.Season)
-            .Where(g => g.Count() > 1)
+            .SelectMany(m => EpisodesIn(m).Distinct().Select(e => (Item: m, Ep: e)))
+            .GroupBy(x => x.Ep)
+            .Where(g => g.Select(x => x.Item).Distinct().Count() > 1)
             .Select(g => g.Key)
-            .Order()
+            .OrderBy(e => e.Season).ThenBy(e => e.Episode)
             .ToList();
 
         if (caution is null && repeated.Count > 0)
         {
+            static string Say((int Season, int Episode) e) => $"{e.Season:00}x{e.Episode:00}";
+
             caution = repeated.Count == 1
-                ? $"Season {repeated[0]} appears in more than one of these - they may be "
+                ? $"{Say(repeated[0])} appears in more than one of these - they may be "
                   + "duplicates, or two different series sharing a name."
-                : $"Seasons {string.Join(", ", repeated)} each appear more than once - they may "
-                  + "be duplicates, or two different series sharing a name.";
+                : $"{string.Join(", ", repeated.Take(3).Select(Say))}"
+                  + (repeated.Count > 3 ? $" and {repeated.Count - 3} more" : "")
+                  + " each appear more than once - they may be duplicates, or two different "
+                  + "series sharing a name.";
         }
 
         return new ShowGroup
@@ -226,6 +259,16 @@ public static class ShowGrouper
             Seasons = seasons,
             Caution = caution
         };
+    }
+
+    /// <summary>The episodes an entry actually holds, read from its files.</summary>
+    private static IEnumerable<(int Season, int Episode)> EpisodesIn(MediaItem item)
+    {
+        foreach (var f in item.Files)
+        {
+            if (EpisodeMatcher.Parse(Path.GetFileName(f)) is { Season: { } s } parsed && s > 0)
+                yield return (s, parsed.Episode);
+        }
     }
 
     /// <summary>The season numbers an entry covers, read from its files.</summary>

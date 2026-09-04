@@ -16,7 +16,14 @@ public partial class HistoryWindow
     {
         InitializeComponent();
         _history = history;
-        _revert = new RevertService(history);
+        // Tag writes are offered here as undoable, so something has to be able
+        // to undo them. Without this the grid showed Retag rows ready to
+        // revert, enabled the button, and then skipped every one of them
+        // silently - the reason went to a log the caller never passed.
+        _revert = new RevertService(history)
+        {
+            Retag = new PyreMedia.Core.Music.MusicTagWriter(history).Undo
+        };
 
         var work = SystemParameters.WorkArea;
         if (Height > work.Height - 60) Height = Math.Max(MinHeight, work.Height - 60);

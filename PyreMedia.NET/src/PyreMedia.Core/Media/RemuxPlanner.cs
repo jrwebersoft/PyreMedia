@@ -68,10 +68,11 @@ public sealed class RemuxFilePlan
     /// Set when nothing being kept is audibly in your language, which is worth
     /// saying even though the file is perfectly valid.
     ///
-    /// The "would remove every audio track" guard only catches the case where
-    /// the rules empty a file. It says nothing when the rules keep a track that
-    /// happens to be Spanish, or an untagged track that might be anything - and
-    /// those are exactly the files you don't want to discover mid-film.
+    /// It covers both shapes of the problem: the rules keeping a track that
+    /// happens to be Spanish or an untagged one that might be anything, and the
+    /// rules matching nothing at all, where the audio is put back rather than
+    /// the file being silenced. Either way the file plays in a language you did
+    /// not ask for, and that is not something to discover mid-film.
     /// </summary>
     public string? LanguageWarning { get; set; }
 
@@ -163,7 +164,7 @@ public sealed class RemuxPlanner(PyreMediaSettings settings)
     private static string? DescribeLanguageConcern(List<MediaStream> keep, string preferred)
     {
         var audio = keep.Where(s => s.Kind == StreamKind.Audio).ToList();
-        if (audio.Count == 0) return null;   // handled by the no-audio guard
+        if (audio.Count == 0) return null;   // a file with no audio at all: nothing to say
 
         if (audio.Any(a => Models.LanguageCatalog.Same(a.Language, preferred)))
             return null;
@@ -218,10 +219,70 @@ public sealed class RemuxPlanner(PyreMediaSettings settings)
 
         var perFile = new List<RemuxFilePlan>();
 
+        // Folders a download client is writing into, worked out once each.
+        var downloading = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var info in files)
         {
+            // Still arriving, or sitting beside something that is.
+            //
+            // The rename side has refused these since it found forty-two .!ut
+            // placeholders beside a part-downloaded Stranger Things. This side
+            // never learned, and it is the side that matters more: remuxing
+            // rewrites the file and retires the original, so doing it to a
+            // torrent the client still has open breaks the transfer and takes
+            // the seed with it.
+            //
+            // The folder check is the one that catches it. Three complete
+            // Stranger Things episodes sat among five that were still
+            // downloading; none of the three carried a marker of its own, so
+            // the per-file check saw nothing wrong and all three were offered.
+            if (Organizing.Downloads.InProgress(info.Path) is { } writing)
+            {
+                plan.Skipped.Add(
+                    $"{Path.GetFileName(info.Path)} - left as is: still downloading ({writing}).");
+                continue;
+            }
+
+            var folder = Path.GetDirectoryName(info.Path) ?? "";
+
+            // One directory listing per folder, not per file.
+            if (!downloading.TryGetValue(folder, out var client))
+                downloading[folder] = client = folder.Length > 0
+                    ? Organizing.Downloads.ActiveIn(folder)
+                    : null;
+
+            if (client is not null)
+            {
+                plan.Skipped.Add(
+                    $"{Path.GetFileName(info.Path)} - left as is: {client} is still downloading "
+                    + "into this folder. Remuxing replaces the file, which breaks the transfer.");
+                continue;
+            }
+
             var keep = new List<MediaStream>();
             var drop = new List<MediaStream>();
+
+            // Whether this file already carries a track you asked for, per kind.
+            //
+            // It decides whether an untagged track is worth rescuing. Keeping
+            // "und" exists as a safety net - the settings say so in as many
+            // words, that dropping them "would take the only audio with them" -
+            // and a net is only needed when there is nothing else to catch. A
+            // file with an English track and an untagged one has already given
+            // you English, so the untagged one is a second copy, a commentary
+            // or a stray, and keeping it on the grounds that it might be the
+            // only audio is keeping it for a reason that is no longer true.
+            //
+            // Per file and per kind, because the answer differs between the
+            // two: a file can carry English audio and no English subtitles.
+            bool Asked(StreamKind kind, HashSet<string> wanted) =>
+                wanted.Count > 0
+                && info.Streams.Any(x => x.Kind == kind
+                                         && Models.LanguageCatalog.WantedBy(wanted, x.Language));
+
+            var haveAudio = Asked(StreamKind.Audio, keepAudio);
+            var haveSubs = Asked(StreamKind.Subtitle, keepSubs);
 
             foreach (var s in info.Streams)
             {
@@ -233,9 +294,14 @@ public sealed class RemuxPlanner(PyreMediaSettings settings)
                 // Matched through the catalogue, not by string equality: a track
                 // tagged "fra" and a rule saying "fre" are the same French, and
                 // comparing directly would drop it as unwanted.
+                // The net, only where nothing else caught it.
+                var rescueUnd = settings.KeepUndeterminedLanguage
+                                && s.Language == "und"
+                                && !(s.Kind == StreamKind.Audio ? haveAudio : haveSubs);
+
                 var matches = wanted.Count == 0
                               || Models.LanguageCatalog.WantedBy(wanted, s.Language)
-                              || (settings.KeepUndeterminedLanguage && s.Language == "und");
+                              || rescueUnd;
 
                 // A forced subtitle carries dialogue the film expects you to read
                 // - alien speech, on-screen text - so dropping it on a language
@@ -246,7 +312,7 @@ public sealed class RemuxPlanner(PyreMediaSettings settings)
                     && s.IsForced
                     && settings.KeepForcedSubtitles
                     && (Models.LanguageCatalog.Same(s.Language, preferred)
-                        || (settings.KeepUndeterminedLanguage && s.Language == "und")))
+                        || rescueUnd))
                 {
                     matches = true;
                 }
@@ -254,19 +320,24 @@ public sealed class RemuxPlanner(PyreMediaSettings settings)
                 (matches ? keep : drop).Add(s);
             }
 
-            // Never strip a file down to no audio - better to leave it untouched.
-            if (!keep.Any(s => s.Kind == StreamKind.Audio) && info.Audio.Any())
-            {
-                // Name the languages it does have - "would remove every audio
-                // track" says what was refused, not how to fix it.
-                var have = string.Join(", ", info.Audio
-                    .Select(a => string.IsNullOrWhiteSpace(a.Language) ? "unknown" : a.Language)
-                    .Distinct(StringComparer.OrdinalIgnoreCase));
+            // Never strip a file down to no audio. The audio goes back rather
+            // than the file being dropped from the plan: refusing to silence a
+            // file is not a reason to refuse everything else a remux does to it.
+            //
+            // Found on a French-only rip that still announced "LEGO Disney
+            // Princesses : Pagaille au chateau" to every player, because it was
+            // skipped whole for having no English track and so never appeared
+            // to have its stale title reset.
+            var silenced = !keep.Any(s => s.Kind == StreamKind.Audio) && info.Audio.Any();
 
-                plan.Skipped.Add(
-                    $"{Path.GetFileName(info.Path)} - left as is: none of its audio matches the "
-                    + $"language you're keeping. This file has {have}.");
-                continue;
+            if (silenced)
+            {
+                var kept = keep.Select(s => s.Index).ToHashSet();
+
+                // Rebuilt in stream order, not appended: the executors hand the
+                // keep list to mkvmerge as the track order of the output.
+                keep = [.. info.Streams.Where(s => kept.Contains(s.Index) || s.Kind == StreamKind.Audio)];
+                drop.RemoveAll(s => s.Kind == StreamKind.Audio);
             }
 
             perFile.Add(new RemuxFilePlan
@@ -278,7 +349,11 @@ public sealed class RemuxPlanner(PyreMediaSettings settings)
                 Mismatches = SignalCheck.Compare(Path.GetFileName(info.Path), info, rpuByFile?.GetValueOrDefault(info.Path)),
                 Keep = keep,
                 Drop = drop,
-                LanguageWarning = DescribeLanguageConcern(keep, preferred)
+                LanguageWarning = DescribeLanguageConcern(keep, preferred) is { } concern
+                    ? silenced
+                        ? concern + " Kept anyway - the rules would have left this file silent."
+                        : concern
+                    : null
             });
         }
 

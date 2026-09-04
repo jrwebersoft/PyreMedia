@@ -47,6 +47,7 @@ public static class ArtworkWriter
         {
             ArtKind.Poster => ("poster", ".jpg"),
             ArtKind.Fanart => ("fanart", ".jpg"),
+            ArtKind.EpisodeThumb => ("thumb", ".jpg"),
             _ => ("clearlogo", ".png")
         };
 
@@ -54,19 +55,64 @@ public static class ArtworkWriter
     }
 
     /// <summary>
+    /// Where a whole series' artwork goes: in the show's folder, named plainly.
+    ///
+    /// This is the half that was missing. A series has one poster and one piece
+    /// of fanart, and Kodi reads them from "poster.jpg" and "fanart.jpg" in the
+    /// show folder - the same place tvshow.nfo goes. Writing the poster beside
+    /// each episode instead gives every episode the same picture, which is both
+    /// wrong and the thing a thumbnail was supposed to avoid.
+    /// </summary>
+    public static string FolderPathFor(string showFolder, ArtKind kind)
+    {
+        var (name, ext) = kind switch
+        {
+            ArtKind.Poster => ("poster", ".jpg"),
+            ArtKind.Fanart => ("fanart", ".jpg"),
+            ArtKind.EpisodeThumb => ("thumb", ".jpg"),
+            _ => ("clearlogo", ".png")
+        };
+
+        return Path.Combine(showFolder, name + ext);
+    }
+
+    /// <summary>
+    /// A season's poster, which Kodi looks for in the show folder rather than in
+    /// the season folder: "season01-poster.jpg", and "season-specials-poster.jpg"
+    /// for season 0.
+    /// </summary>
+    public static string SeasonPosterPath(string showFolder, int season) =>
+        Path.Combine(showFolder,
+            season == 0 ? "season-specials-poster.jpg" : $"season{season:00}-poster.jpg");
+
+    /// <summary>
     /// Fetch one image to its place beside the video.
     /// </summary>
     /// <param name="url">Absolute image url, or null when the provider had none.</param>
-    public static async Task<Result> WriteAsync(
+    public static Task<Result> WriteAsync(
         HttpClient http,
         string videoPath,
         ArtKind kind,
         string? url,
         PyreMediaSettings settings,
         CancellationToken ct = default)
-    {
-        var path = PathFor(videoPath, kind);
+        => WriteToAsync(http, PathFor(videoPath, kind), kind, url, settings, ct);
 
+    /// <summary>
+    /// Fetch one image to an exact path.
+    ///
+    /// Separate from <see cref="WriteAsync"/> because not every image belongs
+    /// beside a video: a series poster goes in the show's folder, and a season
+    /// poster goes there too under its own name.
+    /// </summary>
+    public static async Task<Result> WriteToAsync(
+        HttpClient http,
+        string path,
+        ArtKind kind,
+        string? url,
+        PyreMediaSettings settings,
+        CancellationToken ct = default)
+    {
         if (!settings.DownloadArtwork)
             return new Result(Outcome.SkippedDisabled, path);
 

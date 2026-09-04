@@ -115,6 +115,11 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
                 Path.GetDirectoryName(source)!,
                 Path.GetFileNameWithoutExtension(source) + ".msremux.tmp" + outExt);
 
+            // Whether the original has already been given up for this file. Once
+            // it has, the temp file is the only copy in existence and the
+            // failure paths must not tidy it away.
+            var retired = false;
+
             try
             {
                 if (File.Exists(temp)) File.Delete(temp);
@@ -177,9 +182,31 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
 
                 var sizeAfter = new FileInfo(temp).Length;
 
+                // Nothing is given up until the place the new file has to go is
+                // known to be free. File.Move throws when the destination
+                // exists, and that throw used to land in the catch below - which
+                // deleted the verified output, seconds after the original had
+                // already been archived or recycled. Both copies gone, for a
+                // collision that could have been seen a line earlier.
+                if (!string.Equals(finalPath, source, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(finalPath))
+                {
+                    result.Failed++;
+                    result.Errors.Add(
+                        $"{plan.FileName}: {Path.GetFileName(finalPath)} already exists - "
+                        + "original left untouched");
+
+                    TryDelete(temp);
+                    continue;
+                }
+
                 // Only now is the original expendable. Archived by preference so
                 // it can be restored later; recycled only if archiving is off.
                 var archived = RetireOriginal(source, batchId);
+
+                // Past this point the original is gone, so the remuxed file is
+                // the only copy and must survive any failure below.
+                retired = true;
 
                 // Changing container changes the filename, so the old one must
                 // be gone before the new lands beside it - otherwise the library
@@ -236,14 +263,28 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
             }
             catch (OperationCanceledException)
             {
-                TryDelete(temp);
+                // Only when the original is still there to fall back on.
+                if (!retired) TryDelete(temp);
                 throw;
             }
             catch (Exception ex)
             {
                 result.Failed++;
                 result.Errors.Add($"{plan.FileName}: {ex.Message}");
-                TryDelete(temp);
+
+                if (retired)
+                {
+                    // The original has gone and this is the only copy left, so
+                    // it stays where it is. Analyse finds it as an unfinished
+                    // remux next time and offers to put it in place.
+                    result.Errors.Add(
+                        $"{plan.FileName}: the remuxed file was kept as {Path.GetFileName(temp)} - "
+                        + "the original has already been archived. Press Analyse to finish it.");
+                }
+                else
+                {
+                    TryDelete(temp);
+                }
             }
         }
 
@@ -379,6 +420,17 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
         /// <summary>Complete and safe to adopt: same duration, still has video and audio.</summary>
         public required bool LooksComplete { get; init; }
 
+        /// <summary>
+        /// It reads as a video, and the file it came from is no longer there.
+        ///
+        /// This is the one state where the leftover is the only copy of the
+        /// content in existence - the run died between retiring the original
+        /// and moving this into place. It cannot be checked against anything,
+        /// which is not the same as being broken, and it used to be listed as
+        /// UNUSABLE and deleted outright along with the genuinely broken ones.
+        /// </summary>
+        public bool OnlyCopy { get; init; }
+
         public required string Reason { get; init; }
         public long TempBytes { get; init; }
         public long OriginalBytes { get; init; }
@@ -410,6 +462,7 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
 
                 string reason;
                 var complete = false;
+                var onlyCopy = false;
 
                 if (tempInfo is null)
                 {
@@ -417,7 +470,16 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
                 }
                 else if (!origExists)
                 {
-                    reason = "the original it came from is gone, so it can't be checked against it";
+                    onlyCopy = true;
+
+                    reason = tempInfo.Video.Any()
+                        ? $"the original is gone, so this is the only copy - {tempInfo.Streams.Count} "
+                          + $"track(s), {tempInfo.DurationSeconds:F0}s. Nothing to check it against."
+                        : "the original is gone and this has no video track";
+
+                    // No video and nothing to compare against is the one case
+                    // here that is genuinely not worth keeping.
+                    if (!tempInfo.Video.Any()) onlyCopy = false;
                 }
                 else
                 {
@@ -462,6 +524,7 @@ public sealed class RemuxExecutor(PyreMediaSettings settings, RenameHistory? his
                     OriginalPath = original,
                     OriginalExists = origExists,
                     LooksComplete = complete,
+                    OnlyCopy = onlyCopy,
                     Reason = reason,
                     TempBytes = SafeLength(temp),
                     OriginalBytes = origExists ? SafeLength(original) : 0

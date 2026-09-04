@@ -166,6 +166,10 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
                 Path.GetDirectoryName(source)!,
                 Path.GetFileNameWithoutExtension(source) + ".msremux.tmp.mkv");
 
+            // Whether the original has been given up yet. Once it has, the temp
+            // file is the only copy and the failure paths must leave it alone.
+            var retired = false;
+
             try
             {
                 if (File.Exists(temp)) File.Delete(temp);
@@ -224,7 +228,26 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
                     continue;
                 }
 
+                // The destination has to be free before anything is given up.
+                // File.Move throws when it is not, and that throw used to reach
+                // the catch below, which deleted the verified output - after the
+                // original had already been archived or recycled.
+                if (!string.Equals(finalPath, source, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(finalPath))
+                {
+                    result.Failed++;
+                    result.Errors.Add(
+                        $"{plan.FileName}: {Path.GetFileName(finalPath)} already exists - "
+                        + "original left untouched");
+
+                    TryDelete(temp);
+                    continue;
+                }
+
                 RetireOriginal(source, batchId);
+
+                // Past here the remuxed file is the only copy.
+                retired = true;
 
                 // Archiving usually moves the original away, but if it was only
                 // recycled - or the container changed - make sure the old name
@@ -250,14 +273,24 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
             }
             catch (OperationCanceledException)
             {
-                TryDelete(temp);
+                if (!retired) TryDelete(temp);
                 throw;
             }
             catch (Exception ex)
             {
                 result.Failed++;
                 result.Errors.Add($"{plan.FileName}: {ex.Message}");
-                TryDelete(temp);
+
+                if (retired)
+                {
+                    result.Errors.Add(
+                        $"{plan.FileName}: the remuxed file was kept as {Path.GetFileName(temp)} - "
+                        + "the original has already been archived. Press Analyse to finish it.");
+                }
+                else
+                {
+                    TryDelete(temp);
+                }
             }
         }
 
@@ -298,10 +331,38 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
         if (subs.Count > 0) { args.Add("--subtitle-tracks"); args.Add(string.Join(",", subs)); }
         else if (plan.Info.Subtitles.Any()) { args.Add("--no-subtitles"); }
 
-        // Video default, only when the file has a real choice to express - a DV
-        // track alongside an HDR10 one. With a single track it's redundant.
         var mineVideo = plan.Info.Video.OrderBy(s => s.Index).ToList();
         var theirsVideo = mkvTracks.Where(t => t.Type == "video").OrderBy(t => t.Id).ToList();
+
+        // Video said as explicitly as audio and subtitles, which it was not.
+        // Without this switch mkvmerge keeps every video track, so unticking
+        // one - the embedded cover art, or the second video track on a
+        // DV-plus-HDR10 file - did nothing at all, while the window reported a
+        // track removed and the original was archived for a rewrite that
+        // changed none of what was asked.
+        //
+        // Mapped from plan.Info.Video rather than through Ids, because that
+        // walks every video-kind stream and cover art is one of those on the
+        // ffprobe side while being an attachment rather than a track on
+        // mkvmerge's - so the positions would slide by one on any file with an
+        // embedded poster, and the wrong track would be kept.
+        var video = new List<int>();
+
+        for (var i = 0; i < mineVideo.Count && i < theirsVideo.Count; i++)
+            if (plan.Keep.Any(k => k.Index == mineVideo[i].Index))
+                video.Add(theirsVideo[i].Id);
+
+        if (video.Count == 0 && mineVideo.Count > 0) args.Add("--no-video");
+        else if (video.Count < mineVideo.Count)
+        {
+            args.Add("--video-tracks");
+            args.Add(string.Join(",", video));
+        }
+
+        // Attachments are not tracks and are not covered by any of the above.
+        // A poster attached to the file survives every track switch, so
+        // dropping cover art has to say so separately.
+        if (plan.Drop.Any(d => d.IsCoverArt)) args.Add("--no-attachments");
 
         if (mineVideo.Count > 1)
         {
@@ -380,12 +441,23 @@ public sealed class MkvMergeExecutor(PyreMediaSettings settings, RenameHistory? 
         // it on both sides - otherwise an embedded poster reads as a lost track.
         var expectedVideo = plan.Keep.Count(s => s.Kind == StreamKind.Video && !s.IsCoverArt);
 
-        if (info.Video.Count() < expectedVideo)
+        // Not fewer than expected, and not more either. Testing only for a
+        // shortfall meant a track that was supposed to go and did not passed
+        // the check: unticking a second video track or an embedded poster was
+        // reported as done, the original was archived, and the file still had
+        // everything it started with.
+        if (info.Video.Count() != expectedVideo)
             return $"output has {info.Video.Count()} video track(s), expected {expectedVideo}";
 
-        if (info.Audio.Count() < plan.Keep.Count(s => s.Kind == StreamKind.Audio))
-            return $"output has {info.Audio.Count()} audio track(s), expected "
-                   + plan.Keep.Count(s => s.Kind == StreamKind.Audio);
+        var expectedAudio = plan.Keep.Count(s => s.Kind == StreamKind.Audio);
+
+        if (info.Audio.Count() != expectedAudio)
+            return $"output has {info.Audio.Count()} audio track(s), expected {expectedAudio}";
+
+        var expectedCover = plan.Keep.Count(s => s.IsCoverArt);
+
+        if (info.CoverArt.Count() > expectedCover)
+            return $"output still carries {info.CoverArt.Count()} embedded image(s), expected {expectedCover}";
 
         // Measured against the tracks being kept rather than the source
         // container. See DurationCheck - the flat two seconds this used to

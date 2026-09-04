@@ -1,4 +1,4 @@
-using PyreMedia.Core.History;
+﻿using PyreMedia.Core.History;
 
 namespace PyreMedia.Core.Organizing;
 
@@ -158,6 +158,16 @@ public sealed class RenameExecutor(PyreMediaSettings settings, RenameHistory? hi
 
                 claimed.Add(target);
 
+                // Where the file really went, recorded on the action itself.
+                //
+                // "Keep both" resolved into this local and stopped there, so
+                // the action went on naming the colliding path - the file the
+                // user had just chosen to preserve. Everything downstream reads
+                // TargetPath, so the .nfo and the artwork were written against
+                // that file with the incoming match's data, while the file that
+                // actually moved got neither and stayed invisible to Kodi.
+                action.TargetPath = target;
+
                 MoveOne(action.SourcePath, target, log, title, matchId, batchId);
                 _history.Add(action.IsMove ? HistoryAction.Move : HistoryAction.Rename,
                              action.SourcePath, target, title, matchId, batchId);
@@ -231,6 +241,31 @@ public sealed class RenameExecutor(PyreMediaSettings settings, RenameHistory? hi
             {
                 result.Failed++;
                 result.Errors.Add($"Delete '{action.SourceName}': {ex.Message}");
+            }
+        }
+
+        // A folder that held nothing but what was just deleted.
+        //
+        // The Sample folder is the case that prompted this: tick the clip
+        // inside it and what is left is an empty folder called Sample, which
+        // the next scan has no reason to mention because a folder with no video
+        // is not a library entry. Deleting the only thing in a folder is a
+        // decision about the folder too.
+        //
+        // Only ever inside the item, only when the folder is genuinely empty,
+        // and only after the deletion it followed actually happened.
+        foreach (var folder in EmptiedByDeleting(deletes, plan.ShowFolder))
+        {
+            try
+            {
+                DeleteFolder(folder);
+                log?.Report($"{Path.GetFileName(folder)} - empty after that, removed");
+            }
+            catch (Exception ex)
+            {
+                // Not a failed apply. The file went; the folder is just still
+                // sitting there, which is what it was doing before.
+                log?.Report($"Left \"{Path.GetFileName(folder)}\" - {ex.Message}");
             }
         }
 
@@ -393,6 +428,62 @@ public sealed class RenameExecutor(PyreMediaSettings settings, RenameHistory? hi
         {
             File.Delete(path);
         }
+    }
+
+    private void DeleteFolder(string path)
+    {
+        if (!Directory.Exists(path)) return;
+
+        if (settings.DeleteToRecycleBin)
+            Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                path,
+                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+        else
+            Directory.Delete(path);
+    }
+
+    /// <summary>
+    /// Folders left empty by a set of deletions, innermost first.
+    ///
+    /// Walks up from each deleted file for as long as the folder is empty and
+    /// still inside <paramref name="root"/>. The root itself is never returned:
+    /// an item whose every file was deleted keeps its own folder, because
+    /// removing that is a decision for the person looking at it rather than a
+    /// side effect of ticking a row.
+    /// </summary>
+    private static List<string> EmptiedByDeleting(IEnumerable<PlannedAction> deletes, string root)
+    {
+        var found = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        root = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // Prefix alone would let "Show Extras" pass for a child of "Show".
+        static bool Inside(string dir, string root) =>
+            dir.Length > root.Length
+            && dir.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+            && (dir[root.Length] == Path.DirectorySeparatorChar
+                || dir[root.Length] == Path.AltDirectorySeparatorChar);
+
+        foreach (var action in deletes)
+        {
+            var dir = Path.GetDirectoryName(action.SourcePath);
+
+            while (!string.IsNullOrEmpty(dir) && Inside(dir, root) && seen.Add(dir))
+            {
+                bool empty;
+                try { empty = !Directory.EnumerateFileSystemEntries(dir).Any(); }
+                catch (Exception) { break; }
+
+                if (!empty) break;
+
+                found.Add(dir);
+                dir = Path.GetDirectoryName(dir);
+            }
+        }
+
+        return found;
     }
 
     private static void RenameFolder(string source, string target)

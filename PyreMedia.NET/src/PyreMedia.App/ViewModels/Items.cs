@@ -216,6 +216,14 @@ public partial class PlannedActionItem : ObservableObject
     {
         get
         {
+            // A deletion has no target, and a dash for one told nobody what
+            // was about to happen. Say where it goes instead - these rows sit
+            // among renames and read as one until they are read closely.
+            if (Action.Status == PlanStatus.Delete)
+                return Action.DeleteReason is { Length: > 0 } why
+                    ? $"to the Recycle Bin - {why}"
+                    : "to the Recycle Bin";
+
             if (Action.TargetPath is null) return "-";
 
             // Relative to where the file lives now - never the full path. The
@@ -273,7 +281,17 @@ public partial class PlannedActionItem : ObservableObject
     public string Description => Action.Description;
     public PlanStatus Status => Action.Status;
 
-    public bool CanSelect => Action.Status == PlanStatus.Change;
+    /// <summary>
+    /// Whether the tick box for this row does anything.
+    ///
+    /// Deletions belong here too. Restricting it to renames disabled the box
+    /// on every Delete row, in both directions: the sample and junk files the
+    /// scan offered to remove could never be ticked, so a folder of nothing but
+    /// those left Apply permanently greyed out under a hint saying to tick
+    /// something; and a deletion that arrived pre-ticked could never be
+    /// refused, which is the opposite of what the plan promises.
+    /// </summary>
+    public bool CanSelect => Action.Status is PlanStatus.Change or PlanStatus.Delete;
     public bool WillOverwrite => Action.WillOverwrite;
 
     public string EpisodeLabel => Action.Episode is { } e

@@ -381,17 +381,19 @@ public partial class MusicView : UserControl
                 {
                     var target = Path.Combine(_folders[0], bookFormat.Path(file, book));
 
-                    // Already where it belongs, so it is not part of the plan.
-                    // The music rows leave those out and the book rows did not,
-                    // which meant one list answered two different questions
-                    // depending on which filter was showing.
-                    if (string.Equals(target, file.Path, StringComparison.OrdinalIgnoreCase))
-                        continue;
+                    // A chapter already where it belongs is a Stay, not an
+                    // absence. Dropping those from the list meant "move
+                    // completed" - which looks for exactly them - could never
+                    // find one in the audiobooks view, however finished the
+                    // shelf was. The move filter leaves them out of sight,
+                    // which is all that was wanted.
+                    var settled = string.Equals(target, file.Path, StringComparison.OrdinalIgnoreCase);
 
                     _rows.Add(new MusicRow
                     {
                         IsBook = true,
-                        Action = new MusicAction(file, MusicActionKind.Move,
+                        Action = new MusicAction(file,
+                            settled ? MusicActionKind.Stay : MusicActionKind.Move,
                             target,
                             $"{book.Title} - {book.Why}")
                     });
@@ -1109,7 +1111,15 @@ public partial class MusicView : UserControl
     {
         if (_plan is null || _history is null) return;
 
-        var doing = _plan.Actions
+        // From the rows, which is what the grid shows and what the Apply
+        // button is enabled from.
+        //
+        // Working from the plan instead left audiobooks out entirely: they are
+        // excluded when the plan is grouped, so every chapter was listed as a
+        // move, counted towards the button, and then quietly not carried out.
+        // Nothing anywhere executed a book row.
+        var doing = _rows
+            .Select(r => r.Action)
             .Where(a => a.Kind is MusicActionKind.Move or MusicActionKind.Copy or MusicActionKind.Redundant)
             .ToList();
 
@@ -1132,9 +1142,22 @@ public partial class MusicView : UserControl
         var conflicts = executor.FindConflicts(doing);
 
         // The same dialog the film side uses. A collision is a collision.
-        if (conflicts.Count > 0 && new ConflictWindow(conflicts) { Owner = Window.GetWindow(this) }
-                .ShowDialog() != true)
-            return;
+        //
+        // Its Result has to be read, not just shown: that property is what
+        // writes each row's answer back onto the conflict. Constructing the
+        // window inline and never touching Result left every conflict saying
+        // "Ask" - the value the executor is told never to proceed on - which
+        // fell through its switch to the replace branch. So Skip and Keep both
+        // were collected, displayed, agreed to, and then ignored, and every
+        // collision quietly overwrote.
+        if (conflicts.Count > 0)
+        {
+            var dlg = new ConflictWindow(conflicts) { Owner = Window.GetWindow(this) };
+
+            if (dlg.ShowDialog() != true) return;
+
+            conflicts = [.. dlg.Result];
+        }
 
         var redundant = doing.Count(a => a.Kind is MusicActionKind.Redundant);
 
@@ -1162,6 +1185,10 @@ public partial class MusicView : UserControl
                 var r = executor.Execute(doing, root, conflicts,
                     new Progress<string>(Log), token);
 
+                // The files have moved, and every tag object still describes
+                // where they were. Both of the steps below open files by path.
+                Relocate();
+
                 if (writeTags) WriteTags(r.BatchId, token);
                 if (replayGain) WriteGains(r.BatchId, token);
                 return r;
@@ -1172,8 +1199,6 @@ public partial class MusicView : UserControl
                  + $"failed {result.Failed:N0}. Batch {result.BatchId}.");
 
             foreach (var error in result.Errors.Take(50)) Log($"ERROR {error}");
-
-            BtnApply.IsEnabled = false;
 
             // Apply finishes the job rather than doing a third of it and
             // leaving two more buttons and an ordering rule to remember.
@@ -1188,6 +1213,18 @@ public partial class MusicView : UserControl
             // folder it was in - running this before the sweep would find a
             // fraction of what running it after does.
             await OfferToRemoveEmptyFolders(root, token);
+
+            // The plan has been carried out, so there is no plan any more.
+            //
+            // Turning the button off after Execute did nothing: the finally
+            // below calls Busy(false), which recomputes it from _rows -
+            // untouched by Apply - and switched it straight back on. A second
+            // press then replayed actions whose sources had already moved.
+            // Cleared here rather than earlier because the two sweeps above
+            // read the plan to know which folders they are working through.
+            _plan = null;
+            _rows.Clear();
+            ApplyFilter();
         }
         catch (OperationCanceledException) { Status("Stopped."); }
         catch (Exception ex)
@@ -1196,6 +1233,26 @@ public partial class MusicView : UserControl
             Log($"ERROR {ex.Message}");
         }
         finally { Busy(false); }
+    }
+
+    /// <summary>
+    /// Point every track at where its file actually is, after a move.
+    ///
+    /// Only for files that moved and arrived. A skipped or failed action left
+    /// its file where it was, and pointing at the destination would then be
+    /// the same bug the other way round.
+    /// </summary>
+    private void Relocate()
+    {
+        if (_plan is null) return;
+
+        foreach (var action in _plan.Actions)
+        {
+            if (action.Destination is not { Length: > 0 } moved) continue;
+            if (!File.Exists(moved)) continue;
+
+            action.Track.Path = moved;
+        }
     }
 
     /// <summary>
@@ -1308,8 +1365,12 @@ public partial class MusicView : UserControl
         BtnIdentify.IsEnabled = !busy && _findings.Any(f =>
             f.Ailment is Ailment.Placeholder or Ailment.Missing
             && f.Field is "Title" or "Artist");
-        BtnMove.IsEnabled = !busy && _plan is not null
-            && _plan.Actions.Any(a => a.Kind is MusicActionKind.Stay);
+        // About the list actually on screen. Computed from the music plan
+        // whichever half was showing, it looked live in the audiobooks view
+        // while having nothing there it could ever act on.
+        BtnMove.IsEnabled = !busy && _rows.Any(r =>
+            r.Action.Kind is MusicActionKind.Stay
+            && (_showing == "all" || (_showing == "books") == r.IsBook));
         BtnCancel.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
     }
 }

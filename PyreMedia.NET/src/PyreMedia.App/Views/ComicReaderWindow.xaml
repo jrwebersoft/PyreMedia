@@ -1,0 +1,210 @@
+﻿<ui:FluentWindow x:Class="PyreMedia.App.Views.ComicReaderWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Pages"
+        Height="900" Width="1100"
+        MinHeight="500" MinWidth="700"
+        WindowStartupLocation="CenterOwner"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True"
+        KeyDown="OnKeyDown"
+        SizeChanged="OnSized">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" x:Name="Bar" Title="Pages" ShowMaximize="True" />
+
+        <!-- What the scanner said, if anything -->
+        <Border Grid.Row="1" x:Name="Notes" Margin="16,4,16,8" Padding="12,8" CornerRadius="6"
+                Background="{DynamicResource ControlFillColorDefaultBrush}">
+            <StackPanel>
+                <TextBlock x:Name="TxtSummary" TextWrapping="Wrap" FontSize="12" />
+
+                <!-- What was found on the page currently shown, beside the page
+                     itself, so it can be argued with. -->
+                <TextBlock x:Name="TxtWhy" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"
+                           Visibility="Collapsed"
+                           Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+            </StackPanel>
+        </Border>
+
+        <!-- The page, with an arrow either side -->
+        <Grid Grid.Row="2" x:Name="Middle" Margin="16,0,16,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" x:Name="BackColumn" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" x:Name="ForwardColumn" />
+
+                <!-- Wide enough for a scanner's own page names, which is what
+                     is in here: "wildc.a.t.s._n1-p01.jpg" needs about this much
+                     before it stops being an ellipsis. -->
+                <ColumnDefinition Width="320" MinWidth="0" x:Name="ListColumn" />
+            </Grid.ColumnDefinitions>
+
+            <ui:Button Grid.Column="0" x:Name="BtnBack" Content="&#xE76B;"
+                       FontFamily="Segoe MDL2 Assets" FontSize="18"
+                       Click="OnBack" Appearance="Secondary" Padding="10,40"
+                       VerticalAlignment="Center" ToolTip="Previous page - or the left arrow key" />
+
+            <Border Grid.Column="1" x:Name="PageFrame" Margin="10,0" CornerRadius="6"
+                    ClipToBounds="True"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                <Grid>
+                    <!-- In a scroller, because fitting a whole page on screen is
+                         not the same as being able to read it. A comic page is
+                         about 2000x3000, and even filling a monitor that is a
+                         three-times reduction - the lettering on an advert is
+                         gone. Fit-width and actual-size are what make a page
+                         checkable; fit-page is only for seeing its shape. -->
+                    <ScrollViewer x:Name="PageScroll"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
+                                  PanningMode="Both"
+                                  SizeChanged="OnPageAreaSized"
+                                  PreviewMouseWheel="OnWheel">
+                        <Image x:Name="PageImage" Stretch="Uniform"
+                               MouseLeftButtonDown="OnPageClicked" />
+                    </ScrollViewer>
+
+                    <!-- Marked pages are dimmed and say so, so the state is
+                         visible on the page itself rather than only in a list -->
+                    <Border x:Name="DroppedVeil" Visibility="Collapsed"
+                            Background="#B0000000" IsHitTestVisible="False">
+                        <TextBlock Text="Marked for removal" Foreground="White"
+                                   FontSize="20" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+
+                    <!-- Only in full screen, where nothing else is on screen to
+                         say which page this is or what was said about it. -->
+                    <Border x:Name="FullNotes" Visibility="Collapsed"
+                            VerticalAlignment="Bottom" Background="#C0000000" Padding="14,10">
+                        <StackPanel>
+                            <TextBlock x:Name="TxtFullWhere" Foreground="White"
+                                       FontWeight="SemiBold" FontSize="13" />
+                            <TextBlock x:Name="TxtFullWhy" Foreground="#FFD08A" FontSize="12"
+                                       TextWrapping="Wrap" Margin="0,3,0,0"
+                                       Visibility="Collapsed" />
+                            <TextBlock Foreground="#A0FFFFFF" FontSize="11" Margin="0,5,0,0"
+                                       Text="Arrows turn the page. Space marks it. Escape or F11 comes back." />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <ui:Button Grid.Column="2" x:Name="BtnForward" Content="&#xE76C;"
+                       FontFamily="Segoe MDL2 Assets" FontSize="18"
+                       Click="OnForward" Appearance="Secondary" Padding="10,40"
+                       VerticalAlignment="Center" ToolTip="Next page - or the right arrow key" />
+
+            <!-- Draggable, because a scanner's page names are long and any
+                 fixed width is the wrong one for somebody. -->
+            <GridSplitter Grid.Column="3" Width="8" HorizontalAlignment="Left"
+                          VerticalAlignment="Stretch" Cursor="SizeWE" Margin="4,0,0,0"
+                          Background="{DynamicResource ControlFillColorDefaultBrush}"
+                          ToolTip="Drag to widen the page list" />
+
+            <!-- Every page, so a run of adverts can be seen at once -->
+            <ui:Card Grid.Column="3" Margin="16,0,0,0" Padding="0">
+                <ListBox x:Name="PageList" SelectionChanged="OnPagePicked"
+                         BorderThickness="0" Background="Transparent"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <CheckBox Grid.Column="0" IsChecked="{Binding Drop, Mode=TwoWay}"
+                                          Margin="0,0,8,0" ToolTip="Remove this page" />
+
+                                <!-- Trimmed rather than wrapped, with the whole
+                                     name on hovering. In a narrow window there
+                                     is no width that fits both a readable page
+                                     and a scanner's filename, so the page wins
+                                     and the name stays one hover away. -->
+                                <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                           ToolTip="{Binding Label}"
+                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+
+                                <Border Grid.Column="2" CornerRadius="3" Padding="5,1"
+                                        Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                                        Visibility="{Binding ShowKind, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding KindLabel}" FontSize="10"
+                                               Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </ui:Card>
+        </Grid>
+
+        <!-- Eight buttons and a status line will not fit across any window
+             somebody actually opens, and in one row the whole bar was pushed
+             off the bottom edge. They wrap now, so a narrow window gets two
+             short rows instead of one row nobody can reach. -->
+        <Border Grid.Row="3" x:Name="Bottom" Padding="16,6,16,10">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock x:Name="TxtWhere" FontWeight="SemiBold" Margin="0,0,16,0" />
+                    <TextBlock x:Name="TxtMarked" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <WrapPanel Orientation="Horizontal">
+                    <!-- A page judged too small to read is a page judged badly,
+                         and these get removed. -->
+                    <ui:Button x:Name="BtnZoom" Content="Fit width"
+                               Icon="{ui:SymbolIcon ZoomIn24}"
+                               Click="OnZoom" Appearance="Secondary" Margin="0,0,8,4"
+                               ToolTip="Whole page, fit to width, or actual size - or press Z" />
+
+                    <ui:Button x:Name="BtnFull" Content="Full screen"
+                               Icon="{ui:SymbolIcon FullScreenMaximize24}"
+                               Click="OnFullScreen" Appearance="Secondary" Margin="0,0,8,4"
+                               ToolTip="F11, or double-click the page" />
+
+                    <ui:Button x:Name="BtnMarkAds" Content="Tick the marked adverts"
+                               Click="OnMarkAds" Appearance="Secondary" Margin="0,0,8,4"
+                               ToolTip="Ticks every page the file already calls an advert. Off unless something in it does." />
+
+                    <!-- For the comics nobody marked up, which is nearly all
+                         of them. Reads the pages and says what it found. -->
+                    <ui:Button x:Name="BtnSuggest" Content="Read the pages and suggest"
+                               Click="OnSuggest" Appearance="Secondary" Margin="0,0,8,4"
+                               ToolTip="Reads every page and ticks the ones whose words say they are adverts. Says why for each." />
+
+                    <!-- The safe half of the job, and the one that survives:
+                         nothing leaves the file, and every other reader can see
+                         the answer afterwards. -->
+                    <ui:Button x:Name="BtnRenumber" Content="Rename the pages"
+                               Click="OnRenumber" Appearance="Secondary" Margin="0,0,8,4"
+                               ToolTip="Give every page inside this comic a plain numbered name. Order is unchanged." />
+
+                    <ui:Button x:Name="BtnRecord" Content="Save ticks as adverts"
+                               Click="OnRecord" Appearance="Secondary" Margin="0,0,8,4"
+                               IsEnabled="False"
+                               ToolTip="Writes it into the comic's own ComicInfo.xml. Nothing is removed." />
+
+                    <ui:Button x:Name="BtnDrop" Content="Remove ticked pages"
+                               Click="OnRemove" Appearance="Primary" Margin="0,0,8,4"
+                               IsEnabled="False" />
+                    <ui:Button Content="Close" Click="OnClose" Appearance="Secondary"
+                               Margin="0,0,0,4" />
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

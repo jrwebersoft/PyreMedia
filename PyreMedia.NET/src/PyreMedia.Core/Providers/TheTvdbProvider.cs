@@ -87,6 +87,7 @@ public sealed class TheTvdbProvider(HttpClient http, string apiKey) : IEpisodePr
                 Overview = Val(epEl, "Overview"),
                 FirstAired = Val(epEl, "FirstAired"),
                 ProductionCode = Val(epEl, "ProductionCode"),
+                StillUrl = Still(Val(epEl, "filename")),
                 Source = "TheTVDB"
             });
         }
@@ -102,4 +103,17 @@ public sealed class TheTvdbProvider(HttpClient http, string apiKey) : IEpisodePr
 
     private static string Val(XElement parent, string name) =>
         parent.Element(name)?.Value?.Trim() ?? string.Empty;
+
+    /// <summary>
+    /// The episode's own frame. TheTVDB stores a path relative to its banner
+    /// host, and an absent image is an empty element rather than a missing one -
+    /// so an empty string has to mean "none" rather than becoming a url to
+    /// nothing.
+    /// </summary>
+    private static string? Still(string filename) =>
+        string.IsNullOrWhiteSpace(filename)
+            ? null
+            : filename.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? filename
+                : "https://artworks.thetvdb.com/banners/" + filename.TrimStart('/');
 }

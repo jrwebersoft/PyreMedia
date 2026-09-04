@@ -1,8 +1,8 @@
 # PyreMedia
 
-A Windows media library organiser. It renames and files TV, film, music and
-audiobooks, repairs the metadata around them, and strips audio and subtitle
-tracks you don't want — without ever writing to disk until you have seen the
+A Windows media library organiser. It renames and files TV, film, music,
+audiobooks, comics and ebooks, repairs the metadata around them, and strips
+audio and subtitle tracks you don't want — without ever writing to disk until you have seen the
 change listed and approved it, and without ever making a change you cannot
 undo.
 
@@ -119,6 +119,33 @@ proposes, change nothing until you say so.
 - Redundant copies are moved to a quarantine folder beside the library, never
   deleted, and all of it undoes from History.
 
+### Organises comics and ebooks
+
+The same again for a shelf rather than a library, and the same rule: nothing is
+written until the plan has been read.
+
+- **Files by a pattern you set** — `{series} ({year})/{series} ({year}) #{issue}`
+  for comics, `{author}/{title} ({year})` for books, with the same optional
+  sections that vanish when a field is empty.
+- **Reads what the file already says of itself.** A CBZ or CBR usually carries a
+  `ComicInfo.xml` written by whoever scanned it, and an EPUB carries real
+  metadata written by the publisher. Where that disagrees with an online source,
+  both answers are shown side by side rather than one silently winning.
+- **A folder of loose pages is a comic nobody packed.** It is recognised as one,
+  and the pages are kept in the order they will be packed, with anything that is
+  not a page travelling alongside them.
+- **Tells a story page from an advertisement.** Where the scanner already marked
+  them, that judgement is used, because a person looking at the page beats a
+  guess made from pixels afterwards. Where it did not, the words on the page are
+  read and the verdict comes with the evidence, in words you can check against
+  the page yourself.
+- **Ebook text is read, never guessed at.** An EPUB is a zip of XHTML, so the
+  words are already words. No OCR goes anywhere near it — that is the whole
+  difference between a book and a comic: a comic has to be looked at, a book only
+  has to be opened.
+- **A reader**, so you can see what a file actually is before deciding anything
+  about it.
+
 ### Makes sense of a disc rip
 
 MakeMKV names what it rips after the disc's label and the title's position on
@@ -234,14 +261,24 @@ The manual, with screenshots, is generated from the running application:
 
 ## Status
 
-Version 1.0.0 — the first public release, and it contains everything: TV, film,
-music, audiobooks and disc rips.
+Version 2.0.0 — everything the first release had, plus comics and ebooks.
 
-Some things are proven further than others. Renaming, conflict handling and
-undo are exercised daily on a large library; remuxing is used regularly but on
-a narrower range of files, and the 3D and Dolby Vision paths have been tried on
-few enough files to be worth calling out. Nothing here deletes anything without
-showing it first, and renames undo from History.
+Some things are proven further than others, and it is worth saying which.
+Renaming, conflict handling and undo are exercised daily on a large library.
+Remuxing is used regularly but on a narrower range of files, and the 3D and
+Dolby Vision paths have been tried on few enough files to be worth calling out.
+The music side has been run end to end on a library of seventeen thousand files.
+
+The comic and ebook providers are the least proven part of this. Parsing, naming
+and the provider chain are covered by tests, but the three clients that fetch
+data — Grand Comics Database, Metron and Comic Vine — have never spoken to a
+real source, because each needs an account or a six-gigabyte database dump. They
+are written from the documentation and from what other tools do, and first
+contact with a live source is where any mistake in them will be found. Reading
+files that are already on disk does not depend on any of that.
+
+Nothing here deletes anything without showing it first, and renames undo from
+History.
 
 ## Author
 

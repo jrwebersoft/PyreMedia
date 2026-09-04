@@ -38,6 +38,20 @@ public sealed class MediaStream
     /// exactly sixty seconds "short" when they were dropped.
     /// </summary>
     public double Seconds { get; init; }
+
+    /// <summary>
+    /// True when <see cref="Seconds"/> came from the file's own per-track tag
+    /// rather than from ffprobe's synthesised field.
+    ///
+    /// The difference decides whether the number may be compared. ffprobe fills
+    /// a stream's duration in from the container when the track carries none,
+    /// and on Matroska it does that for every subtitle - so a PGS track reports
+    /// the whole film's length while the picture beside it reports nothing.
+    /// Comparing that against a remux, which writes real tags, reads as a
+    /// ten-minute truncation and threw away a good 20 GB file.
+    /// </summary>
+    public bool SecondsMeasured { get; init; }
+
     public int SampleRate { get; init; }
     public int Width { get; init; }
     public int Height { get; init; }
@@ -503,7 +517,8 @@ public sealed class MediaProbe(string? ffprobePath = null)
                         Profile = NullIfEmpty(Str(s, "profile")),
                         ChannelLayout = NullIfEmpty(Str(s, "channel_layout")),
                         BitRate = long.TryParse(Str(s, "bit_rate"), out var br) ? br : 0,
-                        Seconds = StreamSeconds(s, tags),
+                        Seconds = StreamSeconds(s, tags).Seconds,
+                        SecondsMeasured = StreamSeconds(s, tags).FromTag,
                         SampleRate = int.TryParse(Str(s, "sample_rate"), out var sr) ? sr : 0,
                         Width = s.TryGetProperty("width", out var w) && w.ValueKind == JsonValueKind.Number
                             ? w.GetInt32() : 0,
@@ -667,26 +682,40 @@ public sealed class MediaProbe(string? ffprobePath = null)
     /// <c>01:29:58.518000000</c>. Preferred where it exists, because it is the
     /// answer to the question actually being asked.
     /// </summary>
-    private static double StreamSeconds(JsonElement stream, JsonElement tags)
+    private static (double Seconds, bool FromTag) StreamSeconds(JsonElement stream, JsonElement tags)
     {
         if (tags.ValueKind == JsonValueKind.Object)
         {
-            // Tag names vary in case between muxers - DURATION, Duration.
+            // Tag names vary between muxers in case and in suffix: DURATION,
+            // Duration, and - on a great many real files - DURATION-eng, where
+            // mkvmerge appends the track's language.
+            //
+            // Matching only the bare name threw the real figure away on every
+            // one of those and fell through to ffprobe's own field, which for
+            // video and audio is usually absent. So the picture and the sound
+            // reported no length at all, and the only per-track figure left in
+            // the file was the one ffprobe synthesises for subtitles from the
+            // container - which is how a truncation check ended up deciding
+            // everything on subtitles.
             foreach (var tag in tags.EnumerateObject())
             {
-                if (!tag.NameEquals("DURATION")
-                    && !string.Equals(tag.Name, "duration", StringComparison.OrdinalIgnoreCase))
-                    continue;
+                if (!tag.Name.StartsWith("DURATION", StringComparison.OrdinalIgnoreCase)) continue;
 
                 if (TryHms(tag.Value.ValueKind == JsonValueKind.String ? tag.Value.GetString() : null,
                            out var tagged))
-                    return tagged;
+                    return (tagged, true);
             }
         }
 
+        // ffprobe's own field. Real for some containers and synthesised from
+        // the container for others - notably every subtitle track in a
+        // Matroska file that carries no tag of its own - so it is taken, and
+        // marked as the weaker answer it is.
         return double.TryParse(Str(stream, "duration"),
             System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var plain) ? plain : 0;
+            System.Globalization.CultureInfo.InvariantCulture, out var plain)
+            ? (plain, false)
+            : (0, false);
     }
 
     /// <summary>"01:29:58.518000000" as seconds. False for anything else.</summary>

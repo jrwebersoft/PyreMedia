@@ -44,6 +44,7 @@ public partial class ToolRow : ObservableObject
     [NotifyPropertyChangedFor(nameof(Detail))]
     [NotifyPropertyChangedFor(nameof(ShowWithout))]
     [NotifyPropertyChangedFor(nameof(CanInstall))]
+    [NotifyPropertyChangedFor(nameof(CanFetch))]
     [NotifyPropertyChangedFor(nameof(ShowDownload))]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
     public partial bool Busy { get; set; }
@@ -55,6 +56,7 @@ public partial class ToolRow : ObservableObject
     [NotifyPropertyChangedFor(nameof(Detail))]
     [NotifyPropertyChangedFor(nameof(ShowWithout))]
     [NotifyPropertyChangedFor(nameof(CanInstall))]
+    [NotifyPropertyChangedFor(nameof(CanFetch))]
     [NotifyPropertyChangedFor(nameof(ShowDownload))]
     public partial int Revision { get; set; }
 
@@ -77,6 +79,16 @@ public partial class ToolRow : ObservableObject
     public string Without => Tool.Without;
 
     public bool CanInstall => !Tool.Found && !Busy && Tool.WingetId is not null && ToolLocator.CanInstall;
+
+    /// <summary>
+    /// Offered when there is no winget package but the author publishes builds
+    /// on GitHub, so the answer to "how do I get this" is a button rather than
+    /// a web page and a decision about which of a dozen files to take.
+    /// </summary>
+    public bool CanFetch => !Tool.Found && !Busy && ToolLocator.CanFetch(Tool) && !CanInstall;
+
+    public string FetchLabel => $"Get {Tool.Name}";
+
     public bool ShowDownload => !Tool.Found && !Busy;
     public bool IsIdle => !Busy;
 
@@ -86,6 +98,7 @@ public partial class ToolRow : ObservableObject
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(StatusBrush));
         OnPropertyChanged(nameof(Detail));
+        OnPropertyChanged(nameof(CanFetch));
     }
 }
 
@@ -118,6 +131,9 @@ public partial class SetupWindow
     private int _step;
     private const int LastStep = 4;
 
+    /// <summary>So closing the window after Next or Skip doesn't save twice.</summary>
+    private bool _saved;
+
     public SetupWindow(PyreMediaSettings settings)
     {
         InitializeComponent();
@@ -135,6 +151,16 @@ public partial class SetupWindow
         TxtSetupTmdb.Text = settings.TmdbApiKey;
         TxtSetupTvdb.Text = settings.TvdbApiKey;
         TxtSetupTmdb.TextChanged += (_, _) => UpdateWarning();
+
+        TxtSetupGcd.Text = settings.GcdDatabasePath;
+        TxtSetupMetronUser.Text = settings.MetronUser;
+        TxtSetupMetronPass.Password = settings.MetronPassword;
+        TxtSetupComicVine.Text = settings.ComicVineApiKey;
+
+        // Say whether a path already recorded still holds a real dump - a file
+        // moved or half-unpacked since it was chosen is otherwise only
+        // discovered at the first search.
+        if (settings.GcdDatabasePath is { Length: > 0 }) SayAboutGcd(settings.GcdDatabasePath);
 
         PickLang.Value = settings.PreferredLanguage;
         PickAudio.Value = settings.KeepAudioLanguages;
@@ -165,16 +191,17 @@ public partial class SetupWindow
         ShowStep(0);
         Loaded += async (_, _) => await RecheckAsync();
 
-        // Closing with the X counts as having seen it. Otherwise the wizard
-        // reappears on every launch until you happen to press the right button,
-        // which is how a helpful thing becomes an irritating one. It stays
-        // re-openable from the toolbar.
+        // Closing with the X counts as having seen it, and keeps what was
+        // answered. Otherwise the wizard reappears on every launch until you
+        // happen to press the right button, which is how a helpful thing
+        // becomes an irritating one - and the key you had already pasted went
+        // with it. It stays re-openable from the toolbar.
         Closed += (_, _) =>
         {
-            if (_settings.SetupCompleted) return;
+            if (_saved) return;
 
-            _settings.SetupCompleted = true;
-            _settings.Save();
+            try { Save(); }
+            catch (Exception ex) { AppLog.Error("Saving setup on close", ex); }
         };
     }
 
@@ -204,7 +231,7 @@ public partial class SetupWindow
                   + "package. Only the first two are needed at all: the rest each buy you "
                   + "one thing, and the window says which."),
             1 => ("Metadata keys",
-                  "Where the titles, episode lists and artwork come from. Both services are "
+                  "Where the titles, episode lists and artwork come from. Every service here is "
                   + "free; the keys are registered to you rather than shipped with the "
                   + "program, because a key belongs to the account that created it."),
             2 => ("Folders",
@@ -251,12 +278,19 @@ public partial class SetupWindow
         ShowStep(_step + 1);
     }
 
+    /// <summary>
+    /// Leave the wizard early, keeping whatever was answered on the way.
+    ///
+    /// This used to throw it all away. Someone who pasted a TMDb key, added
+    /// their library folder, then pressed Skip on the next page lost both, and
+    /// the program opened as though they had never typed anything - which
+    /// reads as the app losing your work, not as a shortcut. Every control was
+    /// filled from the settings to begin with, so saving the untouched ones
+    /// writes back exactly what was already there.
+    /// </summary>
     private void OnSkip(object sender, RoutedEventArgs e)
     {
-        // Still record that setup was seen, or it reappears every launch.
-        _settings.SetupCompleted = true;
-        _settings.Save();
-
+        Save();
         DialogResult = false;
     }
 
@@ -370,6 +404,89 @@ public partial class SetupWindow
         }
     }
 
+    /// <summary>
+    /// Fetch a tool from its author's own releases, for the ones no package
+    /// manager carries. The user's part is one button; picking the Windows
+    /// build out of a release page is not a decision worth handing over.
+    /// </summary>
+    private async void OnFetchTool(object sender, RoutedEventArgs e)
+    {
+        // async void: an unhandled throw here would take the app down.
+        ToolRow? row = null;
+
+        try
+        {
+            if ((sender as FrameworkElement)?.Tag is not ToolRow r) return;
+            row = r;
+
+            row.Busy = true;
+            ToolLog.Text = $"Getting {row.Name}...";
+
+            var log = new Progress<string>(line =>
+            {
+                var lines = (ToolLog.Text + "\n" + line).Split('\n');
+                ToolLog.Text = string.Join("\n", lines.TakeLast(6));
+            });
+
+            var got = await ToolLocator.FetchAsync(row.Tool, log);
+
+            // Remember where it landed, so it is still found next launch
+            // without anything being on PATH.
+            if (got is { Ok: true, Path: { } landed })
+            {
+                row.Tool.SetPath(_settings, landed);
+
+                // ffmpeg and ffprobe arrive in the same archive, so a fetch of
+                // one has quietly supplied the other. Every row whose tool is
+                // now sitting in the fetched-tools folder is pointed at it, so
+                // both cards go green from the one download.
+                foreach (var other in _tools)
+                {
+                    if (ReferenceEquals(other, row)) continue;
+
+                    var beside = System.IO.Path.Combine(
+                        ToolLocator.ToolsFolder, System.IO.Path.GetFileName(other.Tool.Executable));
+
+                    if (!beside.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) beside += ".exe";
+
+                    if (System.IO.File.Exists(beside)) other.Tool.SetPath(_settings, beside);
+                }
+
+                Rebuild();
+            }
+
+            ToolLog.Text += "\n" + got.Message;
+
+            await RecheckAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Fetch tool", ex);
+            ToolLog.Text += $"\nFailed: {ex.Message}";
+        }
+        finally
+        {
+            if (row is not null) row.Busy = false;
+            row?.Refresh();
+            UpdateWarning();
+        }
+    }
+
+    /// <summary>
+    /// Rebuild each row's tool against the current settings, after something
+    /// changed where a tool is expected to be.
+    /// </summary>
+    private void Rebuild()
+    {
+        var fresh = ToolLocator.All(_settings);
+
+        foreach (var row in _tools)
+        {
+            if (fresh.FirstOrDefault(f => f.Name == row.Name) is { } f)
+                row.Tool.Executable = f.Executable;
+        }
+    }
+
     private void OnOpenDownload(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not ToolRow row) return;
@@ -401,16 +518,17 @@ public partial class SetupWindow
 
             if (dlg.ShowDialog(this) != true) return;
 
-            switch (row.Name)
-            {
-                case "ffprobe": _settings.FfprobePath = dlg.FileName; break;
-                case "ffmpeg": _settings.FfmpegPath = dlg.FileName; break;
-                case "mkvmerge": _settings.MkvMergePath = dlg.FileName; break;
-            }
+            // Every tool the page offers Browse on, because the tool itself
+            // says where its path is kept. This was a switch on the name that
+            // listed three of the five, and for the other two the dialog
+            // opened, a file was chosen, and nothing whatever happened.
+            row.Tool.SetPath(_settings, dlg.FileName);
 
-            // The row holds the old command, so rebuild against the new settings.
-            var fresh = ToolLocator.All(_settings).First(t => t.Name == row.Name);
-            row.Tool.ResolvedPath = ToolLocator.Resolve(fresh.Executable);
+            // And the row has to ask about the new location, or the recheck
+            // immediately below re-resolves the old bare name, finds nothing -
+            // which is why Browse was needed - and paints the card "not found"
+            // over the path just chosen.
+            Rebuild();
 
             await RecheckAsync();
         }
@@ -447,6 +565,43 @@ public partial class SetupWindow
         UpdateWarning();
     }
 
+    /// <summary>
+    /// Point at the downloaded Grand Comics Database dump, and say straight
+    /// away whether it is one.
+    ///
+    /// The check has always existed and was never called from anywhere - its
+    /// own summary says it is there so a wrong choice is caught when it is made
+    /// rather than at the first search, which is exactly what was happening.
+    /// </summary>
+    private void OnPickGcd(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Where is the Grand Comics Database dump?",
+            Filter = "SQLite database|*.db;*.sqlite;*.sqlite3|All files|*.*"
+        };
+
+        if (dlg.ShowDialog(this) != true) return;
+
+        TxtSetupGcd.Text = dlg.FileName;
+        SayAboutGcd(dlg.FileName);
+    }
+
+    /// <summary>Whether that file is the database it is meant to be.</summary>
+    private void SayAboutGcd(string path)
+    {
+        var trouble = PyreMedia.Core.Books.GcdProvider.Check(path);
+
+        TxtGcdSays.Visibility = Visibility.Visible;
+
+        TxtGcdSays.Text = trouble
+            ?? "That is the Grand Comics Database. Comics can be matched without any key.";
+
+        TxtGcdSays.Foreground = trouble is null
+            ? (Brush)FindResource("SystemFillColorSuccessBrush")
+            : (Brush)FindResource("SystemFillColorCautionBrush");
+    }
+
     private void OnBrowseArchive(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Where should originals be kept?" };
@@ -457,7 +612,10 @@ public partial class SetupWindow
 
     private void BuildSummary()
     {
-        var missing = _tools.Where(t => !t.Tool.Found).Select(t => t.Name).ToList();
+        // Only the tools that matter. Listing the optional ones as "missing"
+        // contradicted the page that had just called their absence normal, and
+        // ended a wizard with a green tick over a complaint about dovi_tool.
+        var missing = _tools.Where(t => !t.Tool.Found && !t.IsOptional).Select(t => t.Name).ToList();
 
         var bits = new List<string>
         {
@@ -465,13 +623,30 @@ public partial class SetupWindow
         };
 
         bits.Add(missing.Count == 0
-            ? "all tools installed"
+            ? "every tool that matters is installed"
             : $"missing {string.Join(" and ", missing)}");
 
         if (ChkMkv.IsChecked == true) bits.Add("remuxing to MKV");
         if (ChkArchive.IsChecked == true) bits.Add("originals kept");
 
         TxtSummary.Text = string.Join(",   ", bits) + ".";
+
+        // "Ready" over an empty key box was the wizard agreeing that nothing
+        // could be searched for.
+        var noKey = string.IsNullOrWhiteSpace(TxtSetupTmdb.Text);
+
+        TxtDoneTitle.Text = noKey ? "Almost ready" : "Ready";
+
+        TxtDoneWarn.Text = noKey
+            ? "There is no TMDb key yet, so nothing can be looked up and no file can be matched. "
+              + "Renaming by hand still works. Add the key in Settings whenever you like - "
+              + "step two of this wizard has the link."
+            : "";
+
+        TxtDoneWarn.Visibility = noKey ? Visibility.Visible : Visibility.Collapsed;
+        IconDone.Foreground = noKey
+            ? (Brush)FindResource("SystemFillColorCautionBrush")
+            : (Brush)FindResource("SystemFillColorSuccessBrush");
     }
 
     private void Save()
@@ -493,6 +668,11 @@ public partial class SetupWindow
         _settings.ArchiveOriginals = ChkArchive.IsChecked == true;
         _settings.TmdbApiKey = TxtSetupTmdb.Text?.Trim() ?? "";
         _settings.TvdbApiKey = TxtSetupTvdb.Text?.Trim() ?? "";
+
+        _settings.GcdDatabasePath = TxtSetupGcd.Text?.Trim() ?? "";
+        _settings.MetronUser = TxtSetupMetronUser.Text?.Trim() ?? "";
+        _settings.MetronPassword = TxtSetupMetronPass.Password ?? "";
+        _settings.ComicVineApiKey = TxtSetupComicVine.Text?.Trim() ?? "";
         _settings.ArchiveRootPath = TxtArchive.Text?.Trim() ?? "";
         _settings.MoveTvFiles = ChkMoveTv.IsChecked == true;
         _settings.MovieFolderPerMovie = ChkMovieFolder.IsChecked == true;
@@ -503,6 +683,8 @@ public partial class SetupWindow
         _settings.SetupCompleted = true;
 
         _settings.Save();
+        _saved = true;
+
         AppLog.Info($"First-run setup completed: {_folders.Count} folder(s).");
     }
 }

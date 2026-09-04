@@ -38,9 +38,29 @@ internal static class Program
 
         outPath = Path.GetFullPath(outPath);
 
-        Console.WriteLine("Building the manual. Each window is shown on screen for a few");
-        Console.WriteLine("seconds to be photographed - WPF renders nothing for a window that");
-        Console.WriteLine("is hidden or off the desktop. Run this when the machine is free.");
+        // --words writes the manual without taking any pictures.
+        //
+        // Photographing the windows takes over the screen for a minute, which is
+        // not something to do to somebody mid-task just because a paragraph
+        // changed. The text is most of the manual and changes far more often
+        // than the windows do, so it is worth being able to rebuild on its own.
+        // Every picture then leaves its labelled "picture to come" slot, which
+        // is the same thing that happens when a capture fails - so a manual
+        // built this way is visibly short of pictures rather than quietly so.
+        var wordsOnly = args.Contains("--words");
+
+        if (wordsOnly)
+        {
+            Console.WriteLine("Building the manual, words only - no pictures will be taken.");
+            Console.WriteLine("Run without --words to photograph the windows.");
+        }
+        else
+        {
+            Console.WriteLine("Building the manual. Each window is shown on screen for a few");
+            Console.WriteLine("seconds to be photographed - WPF renders nothing for a window that");
+            Console.WriteLine("is hidden or off the desktop. Run this when the machine is free.");
+        }
+
         Console.WriteLine();
 
         // Not the temp folder. Every path under it carries the account name -
@@ -91,8 +111,12 @@ internal static class Program
             {
                 var library = BuildLibrary();
                 var music = BuildMusicLibrary();
-                var settings = PrepareSettings(library, music);
-                var shots = CaptureAll(settings, library, music);
+                var comics = BuildComicShelf();
+                var settings = PrepareSettings(library, music, comics);
+
+                var shots = wordsOnly
+                    ? []
+                    : CaptureAll(settings, library, music, comics);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
                 File.WriteAllText(outPath, Manual.Build(shots), new System.Text.UTF8Encoding(false));
@@ -163,6 +187,167 @@ internal static class Program
             File.WriteAllText(Path.Combine(movies, n), "");
 
         return library;
+    }
+
+    /// <summary>
+    /// A small comic shelf whose files are real archives with real pages.
+    ///
+    /// Empty files would do for the video pictures because nothing reads inside
+    /// them. The Books tab does: it opens each archive, counts the pages, reads
+    /// ComicInfo.xml and draws page one as the cover. Photographed against empty
+    /// files it is a picture of an empty grid.
+    ///
+    /// So these are generated - a few coloured pages each, zipped, with the
+    /// sidecar a scanner would have written. Public domain titles, since these
+    /// pictures get published.
+    /// </summary>
+    private static string BuildComicShelf()
+    {
+        var shelf = Path.Combine(_work, "Comics");
+        Directory.CreateDirectory(shelf);
+
+        // Deliberately not tidy, for the same reason the music fixture is not:
+        // a shelf already in order shows nothing of what the screen is for. So
+        // there is a run with a gap in it, an issue with no number at all, and
+        // one comic carrying a page its scanner marked as an advert.
+        //
+        // Public domain titles only, and chosen carefully: a lapsed copyright
+        // is not a lapsed trademark, so the long-running house names are out
+        // even where their earliest issues are free. Eastern Color's Famous
+        // Funnies and the Centaur catalogue are the safe ones - Centaur folded
+        // in 1942 and its books are the stock in trade of the free comic
+        // archives.
+        (string Name, string Series, string? Issue, int Pages, int Total, int? Advert)[] books =
+        [
+            ("Famous Funnies v1 001 (1934).cbz", "Famous Funnies", "1", 8, 4, null),
+            ("Famous Funnies v1 002 (1934).cbz", "Famous Funnies", "2", 8, 4, 5),
+            ("Famous Funnies v1 004 (1934).cbz", "Famous Funnies", "4", 8, 4, null),
+            ("Amazing Mystery Funnies 007 (1938).cbz", "Amazing Mystery Funnies", "7", 6, 0, null),
+            ("Cover Gallery.cbz", "Famous Funnies", null, 3, 0, null),
+        ];
+
+        foreach (var b in books)
+        {
+            var path = Path.Combine(shelf, b.Name);
+
+            using var file = File.Create(path);
+            using var zip = new System.IO.Compression.ZipArchive(
+                file, System.IO.Compression.ZipArchiveMode.Create);
+
+            for (var p = 1; p <= b.Pages; p++)
+            {
+                var entry = zip.CreateEntry($"{p:000}.png");
+                using var to = entry.Open();
+                var png = Page(p, b.Series, b.Issue);
+                to.Write(png, 0, png.Length);
+            }
+
+            // What a scanner would have left inside. The Volume field holds the
+            // year the series began, which is how these are written in the wild
+            // whatever the field is called.
+            var info = new System.Text.StringBuilder();
+            info.Append("<?xml version=\"1.0\"?><ComicInfo>");
+            info.Append($"<Series>{b.Series}</Series>");
+            if (b.Issue is not null) info.Append($"<Number>{b.Issue}</Number>");
+            if (b.Total > 0) info.Append($"<Count>{b.Total}</Count>");
+            info.Append("<Volume>1934</Volume><Year>1934</Year><Publisher>Eastern Color</Publisher>");
+            info.Append($"<PageCount>{b.Pages}</PageCount>");
+
+            if (b.Advert is { } ad)
+                info.Append($"<Pages><Page Image=\"{ad - 1}\" Type=\"Advertisement\" /></Pages>");
+
+            info.Append("</ComicInfo>");
+
+            var xml = zip.CreateEntry("ComicInfo.xml");
+            using var xw = new StreamWriter(xml.Open());
+            xw.Write(info.ToString());
+        }
+
+        // A folder of loose images, which is what Tidy offers to pack.
+        var loose = Path.Combine(shelf, "Amazing Mystery Funnies 008");
+        Directory.CreateDirectory(loose);
+
+        for (var p = 1; p <= 6; p++)
+            File.WriteAllBytes(Path.Combine(loose, $"p{p:000}.png"),
+                               Page(p, "Amazing Mystery Funnies", "8"));
+
+        return shelf;
+    }
+
+    /// <summary>
+    /// One page, as a PNG. Drawn rather than copied, so the manual carries no
+    /// artwork belonging to anybody.
+    /// </summary>
+    private static byte[] Page(int number, string series, string? issue)
+    {
+        var visual = new System.Windows.Media.DrawingVisual();
+
+        using (var dc = visual.RenderOpen())
+        {
+            var w = 600.0;
+            var h = 900.0;
+
+            // A different hue per page, so a row of them reads as a comic
+            // rather than as one picture repeated.
+            var hue = (number * 47) % 360;
+
+            dc.DrawRectangle(new System.Windows.Media.SolidColorBrush(FromHue(hue, 0.30, 0.86)),
+                             null, new Rect(0, 0, w, h));
+
+            dc.DrawRectangle(new System.Windows.Media.SolidColorBrush(FromHue(hue, 0.55, 0.55)),
+                             null, new Rect(40, 40, w - 80, 260));
+
+            for (var i = 0; i < 3; i++)
+            {
+                dc.DrawRectangle(new System.Windows.Media.SolidColorBrush(FromHue(hue, 0.20, 0.95)),
+                                 null, new Rect(40, 340 + i * 180, w - 80, 150));
+            }
+
+            var caption = number == 1
+                ? $"{series}{(issue is null ? "" : $"  #{issue}")}"
+                : $"page {number}";
+
+            var text = new System.Windows.Media.FormattedText(
+                caption, System.Globalization.CultureInfo.InvariantCulture,
+                System.Windows.FlowDirection.LeftToRight,
+                new System.Windows.Media.Typeface("Segoe UI"), number == 1 ? 44 : 28,
+                System.Windows.Media.Brushes.White, 96);
+
+            dc.DrawText(text, new System.Windows.Point(60, number == 1 ? 130 : 100));
+        }
+
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
+            600, 900, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+
+        bitmap.Render(visual);
+
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+
+        using var ms = new MemoryStream();
+        encoder.Save(ms);
+
+        return ms.ToArray();
+    }
+
+    private static System.Windows.Media.Color FromHue(double hue, double sat, double val)
+    {
+        var c = val * sat;
+        var x = c * (1 - Math.Abs(hue / 60 % 2 - 1));
+        var m = val - c;
+
+        var (r, g, b) = hue switch
+        {
+            < 60 => (c, x, 0.0),
+            < 120 => (x, c, 0.0),
+            < 180 => (0.0, c, x),
+            < 240 => (0.0, x, c),
+            < 300 => (x, 0.0, c),
+            _ => (c, 0.0, x)
+        };
+
+        return System.Windows.Media.Color.FromRgb(
+            (byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255));
     }
 
     /// <summary>
@@ -260,11 +445,17 @@ internal static class Program
         p.WaitForExit();
     }
 
-    private static PyreMediaSettings PrepareSettings(string library, string? music)
+    private static PyreMediaSettings PrepareSettings(string library, string? music, string? comics = null)
     {
         var s = PyreMediaSettings.Load();     // scratch folder, so this is fresh
         s.TvFolders.Add(library);
         s.SetupCompleted = true;               // Remux no longer opens a modal
+
+        if (comics is not null)
+        {
+            s.ComicFolders.Add(comics);
+            s.ComicDestination = Path.Combine(_work, "Comic library");
+        }
 
         if (music is not null)
         {
@@ -283,7 +474,7 @@ internal static class Program
     // ---------------- Captures ----------------
 
     private static Dictionary<string, string> CaptureAll(
-        PyreMediaSettings settings, string library, string? music)
+        PyreMediaSettings settings, string library, string? music, string? comics = null)
     {
         var shots = new Dictionary<string, string>();
 
@@ -376,6 +567,12 @@ internal static class Program
             return new RemuxWindow(settings, history, files, "The Cisco Kid");
         }, 1100, 800, 4);
 
+        // ---- the comic side ----
+        //
+        // Before the audio block, which returns early when there is no ffmpeg -
+        // the comic pictures need none and should not be lost with it.
+        if (comics is not null) CaptureComics(shots, comics, Shot);
+
         // ---- the audio side ----
         //
         // Skipped rather than failed when there is no ffmpeg to generate a
@@ -444,6 +641,69 @@ internal static class Program
         }, 900, 620);
 
         return shots;
+    }
+
+    /// <summary>
+    /// The comic side: the Books tab after a scan, the reader open on a real
+    /// archive, and the tidy-up screen.
+    ///
+    /// Like the Audio tab, the Books tab is a pane inside the shell rather than
+    /// a window, so this photographs the shell with that tab chosen.
+    /// </summary>
+    private static void CaptureComics(
+        Dictionary<string, string> shots, string comics,
+        Action<string, Func<Window>, int, int, double, Func<Window, bool>?> shot)
+    {
+        var started = false;
+
+        bool ScannedBooks(Window w)
+        {
+            if (w.FindName("Tabs") is not System.Windows.Controls.TabControl tabs) return false;
+            if (w.FindName("BooksPane") is not System.Windows.Controls.UserControl pane) return false;
+
+            tabs.SelectedIndex = 2;
+
+            var grid = pane.FindName("GridPlan") as System.Windows.Controls.DataGrid;
+            var scan = pane.FindName("BtnScan") as System.Windows.Controls.Button;
+
+            _lastState = $" [rows={grid?.Items.Count} scan-enabled={scan?.IsEnabled}]";
+
+            if (!started && scan is { IsEnabled: true })
+            {
+                started = true;
+                scan.RaiseEvent(new RoutedEventArgs(
+                    System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                return false;
+            }
+
+            return started && scan is { IsEnabled: true } && grid is { Items.Count: > 0 };
+        }
+
+        shot("books", () => new PyreMedia.App.MainWindow(), 1280, 860, 60, ScannedBooks);
+        _lastState = "";
+
+        // The reader, opened on a generated archive. Its pages are real images
+        // in a real zip, so this is the reader doing its actual job rather than
+        // a picture of an empty frame.
+        var one = Path.Combine(comics, "Famous Funnies v1 002 (1934).cbz");
+
+        if (File.Exists(one))
+        {
+            shot("reader", () => new ComicReaderWindow(one, new RenameHistory()),
+                 1100, 900, 4, null);
+        }
+        else
+        {
+            Log.Add("SKIPPED reader - the fixture comic was not written");
+        }
+
+        // Tidy, against the same shelf: it finds the folder of loose images and
+        // the advert page the fixture's own ComicInfo.xml declares.
+        shot("tidy", () =>
+        {
+            var found = PyreMedia.Core.Organizing.Tidy.Gather([], [comics]);
+            return new TidyWindow(found, PyreMediaSettings.Load(), new RenameHistory());
+        }, 1000, 700, 3, null);
     }
 
     private static RenameHistory SampleHistory(string library)

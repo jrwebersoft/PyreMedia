@@ -146,7 +146,16 @@ public static class Identifier
 /// </summary>
 public sealed class TrackTags
 {
-    public required string Path { get; init; }
+    /// <summary>
+    /// Where the file is now.
+    ///
+    /// Settable because a file that has just been moved is somewhere else, and
+    /// everything holding one of these needs to know. Fixed at scan time, it
+    /// meant "fix the tags inside the files" ran after Apply had moved them and
+    /// failed on every single one with "the file is not there" - the count said
+    /// zero written and nothing said why.
+    /// </summary>
+    public required string Path { get; set; }
 
     public TagValue Title { get; set; } = TagValue.Empty;
     public TagValue Artist { get; set; } = TagValue.Empty;

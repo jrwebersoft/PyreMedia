@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Net.Http;
@@ -70,6 +70,8 @@ public partial class MainViewModel : ObservableObject
         _planner = new MediaPlanner(_settings);
         _executor = new RenameExecutor(_settings, _history);
 
+        AutoAdvance = _settings.AutoAdvanceAfterApply;
+
         ItemsView = CollectionViewSource.GetDefaultView(Items);
         ItemsView.Filter = o => o is LibraryItem i && Filter switch
         {
@@ -87,10 +89,17 @@ public partial class MainViewModel : ObservableObject
             SetBanner(problem, true);
         }
 
-        if (HasFolders)
-            _ = ScanAsync();
-        else
-            WriteLog("Welcome. Add a folder to get started.");
+        // No scan from here. The window decides whether to scan on opening,
+        // because that is where the setting is checked and where first-run
+        // setup gets a chance to run first.
+        //
+        // Starting one here as well meant "scan the video folders when the
+        // window opens" did nothing in either position - this is a field
+        // initialiser, so it ran before the window existed to check the
+        // setting, and the check downstream only ever suppressed a second scan
+        // that the busy interlock would have blocked anyway. Two scans per
+        // launch, and a folder list walked before setup had been shown.
+        if (!HasFolders) WriteLog("Welcome. Add a folder to get started.");
     }
 
     // ---------------- Filter ----------------
@@ -123,15 +132,22 @@ public partial class MainViewModel : ObservableObject
         try
         {
             ItemsView.Refresh();
+
+            // Restore only if the item survived the filter.
+            //
+            // Inside the guard, which is the whole reason the guard exists. It
+            // sat outside: the flag was cleared in the finally and then this
+            // line assigned, so re-selecting the very same row after a filter
+            // change ran the full selection-changed path - clearing the match
+            // list, throwing away the built preview, and firing another search
+            // for a row that had not moved.
+            if (keep is not null && ItemsView.Cast<LibraryItem>().Contains(keep))
+                SelectedItem = keep;
         }
         finally
         {
             _suppressSelectionWork = false;
         }
-
-        // Restore only if the item survived the filter.
-        if (keep is not null && ItemsView.Cast<LibraryItem>().Contains(keep))
-            SelectedItem = keep;
     }
 
     /// <summary>Set while the view is being rebuilt, so restoring selection doesn't re-search.</summary>
@@ -162,10 +178,38 @@ public partial class MainViewModel : ObservableObject
     public List<string> Folders => _settings.TvFolders;
     public bool HasFolders => Folders.Count > 0 || _settings.MovieFolders.Count > 0;
 
+    /// <summary>
+    /// Take on several folders at once and scan once at the end.
+    ///
+    /// The Add dialog allows more than one, and adding them one at a time
+    /// meant one scan per folder - which either raced and duplicated every
+    /// row, or, once the interlock was honoured, quietly dropped every folder
+    /// after the first.
+    /// </summary>
+    public void AddFolders(IEnumerable<string> paths)
+    {
+        var added = 0;
+
+        foreach (var path in paths)
+            if (Remember(path)) added++;
+
+        if (added == 0) return;
+
+        if (ScanCommand.CanExecute(null)) ScanCommand.Execute(null);
+    }
+
     [RelayCommand]
     private void AddFolder(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return;
+        if (!Remember(path)) return;
+
+        if (ScanCommand.CanExecute(null)) ScanCommand.Execute(null);
+    }
+
+    /// <summary>Add one folder to the list. True when it was not already there.</summary>
+    private bool Remember(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
 
         // Contains() is an exact, case-sensitive match, so "h:\done" alongside
         // "H:\Done" - or the same path with a trailing slash - both got in, and
@@ -176,7 +220,7 @@ public partial class MainViewModel : ObservableObject
         if (already)
         {
             WriteLog($"Already watching that folder: {path}");
-            return;
+            return false;
         }
 
         Folders.Add(path);
@@ -186,7 +230,7 @@ public partial class MainViewModel : ObservableObject
         ScanCommand.NotifyCanExecuteChanged();
 
         WriteLog($"Added folder: {path}");
-        _ = ScanAsync();
+        return true;
     }
 
     // ---------------- State ----------------
@@ -219,7 +263,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] public partial string? FolderRenameText { get; set; }
     [ObservableProperty] public partial string? FolderRenameProblem { get; set; }
     [ObservableProperty] public partial bool RenameFolderChecked { get; set; } = true;
-    [ObservableProperty] public partial bool AutoAdvance { get; set; } = true;
+    /// <summary>
+    /// Mirrors the setting, and writes back to it. The tick box beside Apply is
+    /// the same switch as the one in Settings, not a second one that forgets.
+    /// </summary>
+    [ObservableProperty] public partial bool AutoAdvance { get; set; }
     [ObservableProperty] public partial bool IsComplete { get; set; }
     [ObservableProperty] public partial string CompleteText { get; set; } = string.Empty;
     [ObservableProperty] public partial string? EmptyPreviewText { get; set; }
@@ -471,6 +519,14 @@ public partial class MainViewModel : ObservableObject
             : "Tick at least one change to enable Apply.";
     }
 
+    partial void OnAutoAdvanceChanged(bool value)
+    {
+        if (_settings.AutoAdvanceAfterApply == value) return;
+
+        _settings.AutoAdvanceAfterApply = value;
+        _settings.Save();
+    }
+
     partial void OnBannerTextChanged(string? value) => OnPropertyChanged(nameof(HasBanner));
     partial void OnFolderRenameTextChanged(string? value) => OnPropertyChanged(nameof(HasFolderRename));
     partial void OnEmptyPreviewTextChanged(string? value) => OnPropertyChanged(nameof(ShowEmptyPreview));
@@ -635,6 +691,10 @@ public partial class MainViewModel : ObservableObject
         {
             if (ct.IsCancellationRequested) return;
 
+            // Nothing to read inside a disc image, and asking costs a spin-up
+            // of whatever drive it lives on for an answer that cannot come.
+            if (_settings.IsDiscImage(item.Media.MainFile)) continue;
+
             try
             {
                 var info = await probe.ProbeAsync(item.Media.MainFile, ct);
@@ -744,16 +804,55 @@ public partial class MainViewModel : ObservableObject
 
             // Routed by the (overridable) kind toggle, not by any global mode.
 
-            if (SearchAsTv)
+            async Task<List<SearchResultItem>> Ask(string term) => SearchAsTv
+                ? [.. (await _metadata.SearchAsync(term, year, ct)).Select(r => new SearchResultItem(r))]
+                : [.. (await _metadata.SearchMoviesAsync(term, year, ct)).Select(r => new SearchResultItem(r))];
+
+            var found = await Ask(SearchTerm);
+            var searched = SearchTerm;
+
+            // Nothing found, so try it shorter.
+            //
+            // TMDb matches on every word, not loosely: one word too many
+            // returns nothing at all rather than a worse match. "SUICIDE SQUAD
+            // EDITION" - what is left of a disc labelled "3D-2D EXTENDED
+            // EDITION" once the release noise is stripped - finds nothing,
+            // while "Suicide Squad" finds it first time. A name is far more
+            // likely to have junk on the end than the beginning, so the end is
+            // what gets dropped.
+            if (found.Count == 0)
             {
-                foreach (var r in await _metadata.SearchAsync(SearchTerm, year, ct))
-                    SearchResults.Add(new SearchResultItem(r));
+                foreach (var shorter in Shorten(SearchTerm))
+                {
+                    if (ct.IsCancellationRequested) return;
+
+                    found = await Ask(shorter);
+                    if (found.Count == 0) continue;
+
+                    searched = shorter;
+                    WriteLog($"Nothing for \"{SearchTerm}\" - searched \"{shorter}\" instead.");
+                    break;
+                }
             }
-            else
-            {
-                foreach (var r in await _metadata.SearchMoviesAsync(SearchTerm, year, ct))
-                    SearchResults.Add(new SearchResultItem(r));
-            }
+
+            // The selection may have moved while that was in flight.
+            //
+            // Cancelling the previous token is not enough on its own: a token is
+            // only observed at an await, so a search whose results had already
+            // come back carried straight on and wrote them - and its confident
+            // match - against whatever row was selected by the time it got
+            // there. Reported as clicking Strange New Worlds and having
+            // Stranger Things chosen instead. They sit next to each other in
+            // the list, which is exactly how two searches end up overlapping:
+            // click one, then the other.
+            if (!ReferenceEquals(SelectedItem, item)) return;
+
+            foreach (var r in found) SearchResults.Add(r);
+
+            // Say so when the answer came from a different question.
+            if (SearchResults.Count > 0 && searched != SearchTerm)
+                SetBanner($"Nothing matched \"{SearchTerm}\", so these are for \"{searched}\". "
+                          + "Check the match before applying.", false);
 
             if (SearchResults.Count == 0)
             {
@@ -763,7 +862,12 @@ public partial class MainViewModel : ObservableObject
             }
 
             StatusText = $"{SearchResults.Count} match(es)";
-            autoPick = PickConfidentMatch();
+
+            // Only when asked for. The setting is off by default and said so,
+            // and picking regardless meant a single search result was chosen,
+            // logged and built into a fully ticked rename plan against a show
+            // nobody had agreed to - one click from Apply.
+            autoPick = _settings.AutoSelectMatch ? PickConfidentMatch() : null;
         }
         catch (OperationCanceledException) { StatusText = "Cancelled"; }
         catch (MetadataException ex)
@@ -786,13 +890,36 @@ public partial class MainViewModel : ObservableObject
 
         // Outside the busy window: assigning while IsBusy was true made the
         // SelectedResult hook skip building the preview.
-        if (autoPick is not null)
+        // Still guarded: this is the assignment that puts a show against a row,
+        // and it sits outside the try above.
+        if (autoPick is not null && ReferenceEquals(SelectedItem, item))
         {
             WriteLog($"Auto-selected '{autoPick.Display}'.");
+
+            // Assigning is enough. The hook on this property starts the preview
+            // build, and awaiting a second one started a race with the first:
+            // the newcomer cancelled the in-flight token, the metadata service
+            // reports a cancelled fetch as no data rather than as cancellation,
+            // and the loser put up "No episode data for 'Firefly (2002)'" over
+            // a perfectly good change list that the winner had just built. The
+            // episode list was also fetched twice for every confident match.
             SelectedResult = autoPick;
-            if (Preview.Count == 0 && !IsComplete)
-                await BuildPreviewAsync();
         }
+    }
+
+    /// <summary>
+    /// The same term with trailing words dropped, longest first.
+    ///
+    /// Never below two words: one word matches half a catalogue, and choosing
+    /// from that is worse than finding nothing and being told so. A two-word
+    /// term is therefore not shortened at all.
+    /// </summary>
+    private static IEnumerable<string> Shorten(string term)
+    {
+        var words = term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        for (var take = words.Length - 1; take >= 2; take--)
+            yield return string.Join(' ', words.Take(take));
     }
 
     private SearchResultItem? PickConfidentMatch()
@@ -845,7 +972,20 @@ public partial class MainViewModel : ObservableObject
     private async Task BuildPreviewAsync()
     {
         var item = SelectedItem;
-        if (SelectedResult is null || item is null) return;
+
+        // Held rather than re-read. The selection moves on its own - auto
+        // advance after an Apply, the rescan that follows it, a fresh scan
+        // clearing the list - and the setter nulls this on the way past. Every
+        // line below used to read the property again after an await, so a run
+        // whose item had moved on dereferenced null and put "Unexpected error:
+        // Object reference not set to an instance of an object" over the
+        // incoming item's plan. The real log has it six times.
+        var picked = SelectedResult;
+        if (picked is null || item is null) return;
+
+        /// <summary>True once the user has moved on and this run is stale.</summary>
+        bool MovedOn() => !ReferenceEquals(SelectedResult, picked)
+                       || !ReferenceEquals(SelectedItem, item);
 
         _cts?.Cancel();
         _cts = new CancellationTokenSource();
@@ -860,12 +1000,15 @@ public partial class MainViewModel : ObservableObject
         {
             if (SearchAsTv)
             {
-                if (SelectedResult.Show is null) return;
+                if (picked.Show is null) return;
 
-                if (_currentShow is null || _currentShow.Id != SelectedResult.Show.TvdbId)
+                if (_currentShow is null || _currentShow.Id != picked.Show.TvdbId)
                 {
                     _currentShow = await _metadata.GetShowAsync(
-                        SelectedResult.Show, new Progress<string>(WriteLog), ct);
+                        picked.Show, new Progress<string>(WriteLog), ct);
+
+                    // Nothing here belongs to the item on screen any more.
+                    if (MovedOn()) return;
 
                     if (_currentShow is not null)
                     {
@@ -877,7 +1020,7 @@ public partial class MainViewModel : ObservableObject
                 if (_currentShow is null)
                 {
                     StatusText = "No episode data";
-                    SetBanner($"No episode data for '{SelectedResult.Display}'.", true);
+                    SetBanner($"No episode data for '{picked.Display}'.", true);
                     return;
                 }
 
@@ -885,13 +1028,16 @@ public partial class MainViewModel : ObservableObject
             }
             else
             {
-                if (SelectedResult.MovieResult is null) return;
+                if (picked.MovieResult is null) return;
 
-                _currentMovie = await _metadata.GetMovieAsync(SelectedResult.MovieResult.TmdbId, ct);
+                _currentMovie = await _metadata.GetMovieAsync(picked.MovieResult.TmdbId, ct);
+
+                if (MovedOn()) return;
+
                 if (_currentMovie is null)
                 {
                     StatusText = "No movie data";
-                    SetBanner($"No details for '{SelectedResult.Display}'.", true);
+                    SetBanner($"No details for '{picked.Display}'.", true);
                     return;
                 }
 
@@ -996,9 +1142,17 @@ public partial class MainViewModel : ObservableObject
             }
         }
 
-        EmptyPreviewText = Preview.Count == 0 && !IsComplete
-            ? "No video files found here. Check the allowed file types in Settings."
-            : null;
+        // Only claim there are no files when the plan really found none.
+        //
+        // IsComplete also insists there is no folder rename outstanding, so a
+        // show whose episodes were all correctly named but whose folder was
+        // still a release name produced an empty preview with IsComplete false
+        // - and this then sent the user to the file-type setting to fix files
+        // that had been found and read perfectly well.
+        EmptyPreviewText = Preview.Count > 0 || IsComplete ? null
+            : _plan is { Actions.Count: > 0 }
+                ? "Every file here is already named correctly - only the folder would change."
+                : "No video files found here. Check the allowed file types in Settings.";
 
         UpdateWaitingHint();
 
@@ -1087,12 +1241,29 @@ public partial class MainViewModel : ObservableObject
 
         if (_plan.UnchangedCount > 0) parts.Add($"{_plan.UnchangedCount} already correct");
         if (_plan.ProblemCount > 0) parts.Add($"{_plan.ProblemCount} need attention");
-        if (_plan.DeleteCount > 0) parts.Add($"{_plan.DeleteCount} to delete");
+        // Ticked, not merely found. This counted every deletion the plan had
+        // offered whether or not it was going to happen, so a preview about to
+        // delete nothing still read "2 to delete" - and the folder came out of
+        // Apply still holding the sample clip and the release advert it had
+        // just promised to remove. Deletions arrive unticked on purpose; that
+        // is worth saying out loud rather than reporting them as done deals.
+        if (_plan.DeleteCount > 0)
+        {
+            var ticked = Preview.Count(p => p.IsSelected && p.Status == PlanStatus.Delete);
+
+            parts.Add(ticked == _plan.DeleteCount ? $"{ticked} to delete"
+                    : ticked == 0 ? $"{_plan.DeleteCount} leftover(s) found - none ticked"
+                    : $"{ticked} of {_plan.DeleteCount} leftover(s) ticked");
+        }
 
         var overwrites = Preview.Count(p => p.IsSelected && p.WillOverwrite);
         if (overwrites > 0) parts.Add($"{overwrites} will replace an existing file");
 
         PreviewSummary = string.Join("   |   ", parts);
+
+        OnPropertyChanged(nameof(UntickedJunkCount));
+        OnPropertyChanged(nameof(HasUntickedJunk));
+        OnPropertyChanged(nameof(UntickedJunkText));
     }
 
     [RelayCommand]
@@ -1105,6 +1276,28 @@ public partial class MainViewModel : ObservableObject
     private void SelectNone()
     {
         foreach (var p in Preview) p.IsSelected = false;
+    }
+
+    /// <summary>
+    /// Leftovers the plan found and nobody ticked - sample clips, release
+    /// adverts, the .nfo a tracker leaves behind.
+    ///
+    /// They are offered unticked because a deletion is not something to default
+    /// into. What was missing was any way to accept them all without also
+    /// accepting every rename, and any word afterwards that they had been left:
+    /// a folder came out of a rename still holding a 77 MB sample and a scene
+    /// .nfo, and the only way to find that out was to open it in Explorer.
+    /// </summary>
+    public int UntickedJunkCount => Preview.Count(p => p.Status == PlanStatus.Delete && !p.IsSelected);
+
+    public bool HasUntickedJunk => UntickedJunkCount > 0;
+
+    public string UntickedJunkText => $"Leftovers ({UntickedJunkCount})";
+
+    [RelayCommand]
+    private void SelectLeftovers()
+    {
+        foreach (var p in Preview.Where(p => p.Status == PlanStatus.Delete)) p.IsSelected = true;
     }
 
     // ---------------- Apply ----------------
@@ -1175,6 +1368,19 @@ public partial class MainViewModel : ObservableObject
 
             var msg = bits.Count > 0 ? "Done - " + string.Join(", ", bits) : "Nothing to do";
 
+            // Leftovers that were offered and not taken. Silence here is how a
+            // renamed folder kept a 77 MB sample clip and a tracker's .nfo:
+            // they were listed in the preview, unticked as deletions always
+            // are, and Apply walked past them without a word. Nothing is
+            // deleted on the strength of this - it just stops the answer to
+            // "why is this still here?" being a trip to Explorer.
+            var skipped = plan.Actions.Count(a => a.Status == PlanStatus.Delete
+                                                  && !chosen.Contains(a));
+
+            if (skipped > 0)
+                msg += $".  {skipped} leftover file(s) left in place - "
+                       + "tick them with Leftovers to remove them.";
+
             // The files moved either way; what's missing is the ability to put
             // them back, and that has to be said plainly.
             var historyLost = _history.FailedWrites;
@@ -1199,12 +1405,23 @@ public partial class MainViewModel : ObservableObject
                 await WriteArtworkAsync(chosen);
             }
 
+            // Whether this item is finished is what the run reported, not what
+            // a fresh plan says afterwards.
+            //
+            // MediaItem.Path and MainFile are fixed at scan time, so once a
+            // show folder has been renamed - which is the default - re-planning
+            // works from a folder that no longer exists and every episode comes
+            // back as still needing a move. The item was therefore never marked
+            // done, the green tick never appeared, "move to next automatically"
+            // never advanced, and finished items were offered again forever.
+            var clean = result.Failed == 0 && result.Errors.Count == 0;
+
+            if (clean) item.IsDone = true;
+
             // Re-scan this item from disk so the plan reflects reality.
             RefreshSelectedItemFiles();
             RebuildPlan();
 
-            var clean = result.Failed == 0 && Preview.Count == 0;
-            if (clean) item.IsDone = true;
             if (clean && AutoAdvance) NextItem();
 
             // A rename can create folders, move files between them and change
@@ -1253,8 +1470,18 @@ public partial class MainViewModel : ObservableObject
                     ?? Items.FirstOrDefault(i =>
                         string.Equals(i.DisplayName, keepName, StringComparison.OrdinalIgnoreCase));
 
-        if (again is not null && !again.IsDone)
-            SelectedItem = again;
+        // Whether it is finished or not.
+        //
+        // This used to refuse to reselect a finished item, which was harmless
+        // only for as long as nothing ever marked one finished. Once that was
+        // fixed, applying a rename left the selection empty - and Play, the
+        // per-item Remux and Artwork are all bound to there being a selection,
+        // so they vanished from a film the moment it was correctly named. The
+        // one thing you most want to do after tidying a file up is look at it.
+        //
+        // Advancing past a finished item is auto-advance's job, and it has
+        // already run by the time this does.
+        if (again is not null) SelectedItem = again;
     }
 
     /// <summary>
@@ -1264,6 +1491,69 @@ public partial class MainViewModel : ObservableObject
     /// pairs them by filename, and writing first would leave the sidecar
     /// orphaned the moment the video moved.
     /// </summary>
+    /// <summary>
+    /// Write the .nfo and fetch the artwork again for this item, whether or not
+    /// anything needs renaming.
+    ///
+    /// Apply only ever runs on changes, so an item that was already named
+    /// correctly had no route to either - and they are the two things most
+    /// often worth redoing: a poster you did not want, a sidecar written before
+    /// the match was corrected, artwork something else deleted.
+    ///
+    /// Works from where the files are now, since nothing is moving.
+    /// </summary>
+    public async Task RedoSidecarsAsync()
+    {
+        if (_plan is null || SelectedItem is null) return;
+
+        // A plan for files that are staying put: the target is where each one
+        // already is, which is what both writers key off. Where the plan named
+        // no target - because nothing was going to change - the file's own
+        // path is the truthful answer, and saying so is what lets a correctly
+        // named file get its sidecars rewritten at all.
+        var here = new List<PlannedAction>();
+
+        foreach (var a in _plan.Actions)
+        {
+            if (a.TargetPath is not { Length: > 0 } t || !File.Exists(t))
+            {
+                if (!File.Exists(a.SourcePath)) continue;
+                a.TargetPath = a.SourcePath;
+            }
+
+            here.Add(a);
+        }
+
+        if (here.Count == 0)
+        {
+            SetBanner("Nothing to write - none of this item's files are where the scan left them. "
+                      + "Scan again first.", true);
+            return;
+        }
+
+        IsBusy = true;
+
+        try
+        {
+            StatusText = "Writing sidecars...";
+
+            await WriteNfosAsync(here);
+            await WriteArtworkAsync(here);
+
+            StatusText = "Done";
+            SetBanner($"Rewrote the .nfo and artwork for {here.Count} file(s).", false);
+        }
+        catch (Exception ex)
+        {
+            SetBanner($"Could not rewrite them: {ex.Message}", true);
+            AppLog.Error("Redo sidecars", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task WriteNfosAsync(List<PlannedAction> applied)
     {
         if (!_settings.WriteNfoFiles) return;
@@ -1372,74 +1662,156 @@ public partial class MainViewModel : ObservableObject
         foreach (var action in applied)
         {
             if (action.TargetPath is not { } target) continue;
-            if (Path.GetDirectoryName(target) is not { } dir) continue;
-
-            // A season folder is not the show. Its parent is.
-            var isSeason = PyreMedia.Core.Naming.EpisodeMatcher.ParseSeasonFolder(
-                Path.GetFileName(dir), _settings.SeasonFolderName) is not null;
-
-            var show = isSeason ? Path.GetDirectoryName(dir) : dir;
-
-            // Never the scan root itself. A loose file that stayed put would put
-            // one tvshow.nfo over a folder holding every show there is, and Kodi
-            // would read the whole staging area as a single series.
-            if (string.IsNullOrEmpty(show)) continue;
-            if (MediaScanner.ScanRoots(_settings).Any(r => MediaScanner.SameFolder(r, show))) continue;
-
-            folders.Add(show);
+            if (ShowFolderFor(target) is { } show) folders.Add(show);
         }
 
         return folders;
     }
 
     /// <summary>
-    /// Poster and fanart beside each renamed file, where Kodi looks for them.
-    /// Off unless asked for: it reaches the network and writes files that have
-    /// nothing to do with renaming.
+    /// The show folder holding one episode, or null where there isn't a safe
+    /// one.
+    ///
+    /// Public because the artwork picker needs the same answer: a series poster
+    /// goes here, and getting it wrong by one level puts it in the library root
+    /// where every show would pick it up.
+    /// </summary>
+    public string? ShowFolderFor(string episodePath)
+    {
+        if (Path.GetDirectoryName(episodePath) is not { } dir) return null;
+
+        // A season folder is not the show. Its parent is.
+        var isSeason = PyreMedia.Core.Naming.EpisodeMatcher.ParseSeasonFolder(
+            Path.GetFileName(dir), _settings.SeasonFolderName) is not null;
+
+        var show = isSeason ? Path.GetDirectoryName(dir) : dir;
+
+        // Never the scan root itself. A loose file that stayed put would put one
+        // tvshow.nfo - and now one poster - over a folder holding every show
+        // there is, and Kodi would read the whole staging area as a single
+        // series.
+        if (string.IsNullOrEmpty(show)) return null;
+        if (MediaScanner.ScanRoots(_settings).Any(r => MediaScanner.SameFolder(r, show))) return null;
+
+        return show;
+    }
+
+    /// <summary>
+    /// Artwork where Kodi looks for it. Off unless asked for: it reaches the
+    /// network and writes files that have nothing to do with renaming.
+    ///
+    /// A film is one thing with one poster, so the poster goes beside it.
+    ///
+    /// A series is not. It has one poster for the whole run and a different
+    /// picture for every episode, and those go in different places: the poster
+    /// into the show's folder next to tvshow.nfo, and each episode's own frame
+    /// beside that episode as "-thumb.jpg". This used to write the show's poster
+    /// beside every episode, which gave a season of identical thumbnails in the
+    /// one place a picture was meant to tell them apart.
     /// </summary>
     private async Task WriteArtworkAsync(List<PlannedAction> applied)
     {
         if (!_settings.DownloadArtwork) return;
 
-        var poster = SearchAsTv ? SelectedResult?.Show?.PosterUrl : SelectedResult?.MovieResult?.PosterUrl;
-        if (string.IsNullOrWhiteSpace(poster)) return;
-
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         var written = 0;
         var failed = 0;
+        var noPicture = 0;
 
-        // One image per file. For a season that means the same poster beside
-        // every episode, which is what Kodi expects of the sidecar form.
-        foreach (var action in applied)
+        async Task Fetch(string path, ArtKind kind, string? url, string what)
         {
-            if (action.TargetPath is not { } target || !File.Exists(target)) continue;
+            if (string.IsNullOrWhiteSpace(url)) { noPicture++; return; }
 
             try
             {
-                var r = await ArtworkWriter.WriteAsync(http, target, ArtKind.Poster, poster, _settings);
+                var r = await ArtworkWriter.WriteToAsync(http, path, kind, url, _settings);
 
                 switch (r.Outcome)
                 {
                     case ArtworkWriter.Outcome.Written: written++; break;
                     case ArtworkWriter.Outcome.Failed:
                         failed++;
-                        WriteLog($"artwork: {Path.GetFileName(target)} - {r.Detail}");
+                        WriteLog($"artwork: {what} - {r.Detail}");
                         break;
                 }
             }
             catch (Exception ex)
             {
                 failed++;
-                AppLog.Error($"artwork for {target}", ex);
+                AppLog.Error($"artwork for {path}", ex);
             }
         }
 
-        if (written + failed == 0) return;
+        if (!SearchAsTv)
+        {
+            var poster = SelectedResult?.MovieResult?.PosterUrl;
 
+            foreach (var action in applied)
+            {
+                if (action.TargetPath is not { } target || !File.Exists(target)) continue;
+
+                await Fetch(ArtworkWriter.PathFor(target, ArtKind.Poster),
+                            ArtKind.Poster, poster, Path.GetFileName(target));
+            }
+        }
+        else
+        {
+            // The series poster: once, in the show's folder, beside tvshow.nfo.
+            var showPoster = SelectedResult?.Show?.PosterUrl;
+
+            // Which seasons this run actually touched. A season's poster is
+            // worth writing only for a season that is here - fetching artwork
+            // for eight seasons because the show has eight would download seven
+            // images for episodes nobody owns.
+            var seasons = applied
+                .Select(a => a.Episode?.SeasonNumber)
+                .Where(s => s is not null)
+                .Select(s => s!.Value)
+                .Distinct()
+                .ToList();
+
+            foreach (var folder in ShowFoldersOf(applied))
+            {
+                await Fetch(ArtworkWriter.FolderPathFor(folder, ArtKind.Poster),
+                            ArtKind.Poster, showPoster, Path.GetFileName(folder) + " poster");
+
+                // Season posters go in the show folder too, which is the part
+                // that catches people out - "season01-poster.jpg" beside
+                // tvshow.nfo, not inside the season folder.
+                foreach (var number in seasons)
+                {
+                    var art = _currentShow?.Seasons.FirstOrDefault(s => s.Number == number)?.PosterUrl;
+
+                    await Fetch(ArtworkWriter.SeasonPosterPath(folder, number),
+                                ArtKind.Poster, art, $"season {number} poster");
+                }
+            }
+
+            // Then each episode's own frame beside the episode itself.
+            foreach (var action in applied)
+            {
+                if (action.TargetPath is not { } target || !File.Exists(target)) continue;
+
+                // The episode is already on the action, carrying its own frame.
+                await Fetch(ArtworkWriter.PathFor(target, ArtKind.EpisodeThumb),
+                            ArtKind.EpisodeThumb, action.Episode?.StillUrl,
+                            Path.GetFileName(target));
+            }
+        }
+
+        if (written + failed + noPicture == 0) return;
+
+        // Counted separately and said plainly. "Nothing happened" reads as a
+        // failure, and an episode nobody has photographed is not one - older
+        // shows have no stills at all, and that is worth knowing rather than
+        // wondering about.
         WriteLog($"artwork: {written} written"
-                 + (failed > 0 ? $", {failed} failed." : "."));
+                 + (failed > 0 ? $", {failed} failed" : "")
+                 + (noPicture > 0 ? $", {noPicture} had no picture at the source" : "")
+                 + ".");
     }
+
 
     /// <summary>Files were renamed, so the item's cached file list is stale.</summary>
     private void RefreshSelectedItemFiles()
@@ -1456,7 +1828,9 @@ public partial class MainViewModel : ObservableObject
 
             if (!Directory.Exists(dir)) return;
 
-            var exts = _settings.VideoExtensions;
+            // Same list the scan used, or a disc image would drop out of the
+            // item the moment its files were re-read.
+            var exts = _settings.ScannedExtensions;
             var subs = _settings.SubtitleExtensions;
 
             item.Media.Files.Clear();

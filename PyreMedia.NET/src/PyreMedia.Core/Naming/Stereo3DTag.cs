@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace PyreMedia.Core.Naming;
 
@@ -21,8 +21,16 @@ public static partial class Stereo3DTag
     private static partial Regex Bracketed();
 
     /// <summary>A bare layout token: "HSBS", "Half-SBS", "3D", "HOU", "MVC".</summary>
+    /// <remarks>
+    /// The paired forms come first, so "3D-2D" is taken as one token rather
+    /// than as "3D" followed by something unrecognised. A disc holding both
+    /// cuts is labelled that way - "SUICIDE_SQUAD 3D-2D EXTENDED EDITION" - and
+    /// removing only the "3D" left a film called "SUICIDE SQUAD -2D EDITION".
+    /// </remarks>
     [GeneratedRegex(
-        @"(?<![A-Za-z0-9])(?:3[\s._-]*d|half[\s._-]*sbs|h[\s._-]?sbs|full[\s._-]*sbs|sbs|" +
+        @"(?<![A-Za-z0-9])(?:3[\s._-]*d[\s._-]*[-+/][\s._-]*2[\s._-]*d|" +
+        @"2[\s._-]*d[\s._-]*[-+/][\s._-]*3[\s._-]*d|" +
+        @"3[\s._-]*d|half[\s._-]*sbs|h[\s._-]?sbs|full[\s._-]*sbs|sbs|" +
         @"half[\s._-]*ou|h[\s._-]?ou|hou|ou|half[\s._-]*tab|h[\s._-]?tab|tab|" +
         @"half[\s._-]*tb|h[\s._-]?tb|htb|tb|mvc|bd3d|anaglyph)(?![A-Za-z0-9])",
         RegexOptions.IgnoreCase)]
@@ -49,7 +57,12 @@ public static partial class Stereo3DTag
         // Only trust bare layout tokens when "3D" appears too, so an innocent
         // "TB" or "OU" in a title can't masquerade as a 3D marker.
         var says3D = bracketed.Success
-            || Regex.IsMatch(name, @"(?<![A-Za-z0-9])3[\s._-]*d(?![A-Za-z0-9])", RegexOptions.IgnoreCase);
+            || Regex.IsMatch(name, @"(?<![A-Za-z0-9])3[\s._-]*d(?![A-Za-z0-9])", RegexOptions.IgnoreCase)
+            // "BD3DRmx" - release names run their words together, and the
+            // boundary rule above cannot see the 3D inside one. "bd3d" is
+            // distinctive enough to be trusted without it; a bare "3d" is not,
+            // which is why this is spelt out rather than loosening the rule.
+            || Regex.IsMatch(name, @"bd[\s._-]*3[\s._-]*d", RegexOptions.IgnoreCase);
 
         if (!says3D) return null;
 
@@ -71,6 +84,16 @@ public static partial class Stereo3DTag
         return "(3D)";
     }
 
+    /// <summary>
+    /// The tag for a 3D disc image, which is its own thing.
+    ///
+    /// A raw disc is not side-by-side or top-and-bottom - those describe a
+    /// re-encode, and the whole point of keeping the image is that nothing has
+    /// been done to it yet. "(3D-ISO)" says what it is: the disc, still 3D,
+    /// still whole. Null in, null out - a 2D image gets no tag at all.
+    /// </summary>
+    public static string? ForDiscImage(string? tag) => tag is null ? null : "(3D-ISO)";
+
     /// <summary>Map any spelling onto the canonical suffix.</summary>
     private static string Canonical(string variant)
     {
@@ -83,8 +106,11 @@ public static partial class Stereo3DTag
             "HTB" or "HALFTB" or "HOU" or "HALFOU" or "HTAB" or "HALFTAB" => "(3D-HTB)",
             "TB" or "FULLTB" or "OU" or "TAB" => "(3D-TB)",
             // "D" is what's left of "3D" once digits are stripped - it means the
-            // bare marker, not a layout called D.
-            "MVC" or "BD" or "BDD" or "D" or "" => "(3D)",
+            // bare marker, not a layout called D. "DD" is what's left of a disc
+            // carrying both cuts, "3D-2D", which says nothing about layout
+            // either - and it is also what a bracketed "(DD5.1)" reduces to, so
+            // this stops an audio codec being read as a 3D format.
+            "MVC" or "BD" or "BDD" or "D" or "DD" or "" => "(3D)",
             _ => $"(3D-{v})"      // unrecognised but clearly deliberate - keep it
         };
     }

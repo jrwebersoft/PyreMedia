@@ -44,6 +44,8 @@ releases/**/*.exe
 # publish.ps1's working output. The copy that matters is kept under releases/.
 PyreMedia-Release/
 PyreMedia-Release-Small/
+PyreMedia-Release-Clean/
+PyreMedia-Release-Clean-Small/
 
 # API keys. A working build carries its owner's keys in a file beside the exe
 # rather than in the source, because a key in the repository is public the

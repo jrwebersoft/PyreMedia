@@ -234,7 +234,12 @@ public partial class RemuxWindow
             name, @"^(season|series)[\s._-]*\d+$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     private readonly RenameHistory _history;
-    private readonly IReadOnlyList<string> _files;
+    /// <summary>
+    /// The files this window is about. A list rather than a read-only view
+    /// because remuxing to MKV changes an extension, and the window has to
+    /// follow its files to their new names.
+    /// </summary>
+    private readonly List<string> _files;
     private readonly MediaProbe _probe;
 
     private readonly ObservableCollection<LayoutRow> _groups = [];
@@ -248,7 +253,7 @@ public partial class RemuxWindow
 
         _settings = settings;
         _history = history;
-        _files = files;
+        _files = [.. files];
         _scope = scope;
         _probe = new MediaProbe(settings.FfprobePath);
 
@@ -288,7 +293,14 @@ public partial class RemuxWindow
             if (orphans.Count == 0) return;
 
             var good = orphans.Where(o => o.LooksComplete).ToList();
-            var bad = orphans.Except(good).ToList();
+
+            // Kept out of "bad" on purpose. These read as video and the file
+            // they came from is gone, which makes each one the only copy of
+            // its content left - not a broken leftover. They used to be listed
+            // as UNUSABLE and deleted outright, with File.Delete rather than
+            // the Recycle Bin, on the button that says "recover".
+            var lone = orphans.Where(o => !o.LooksComplete && o.OnlyCopy).ToList();
+            var bad = orphans.Except(good).Except(lone).ToList();
 
             var msg = $"Found {orphans.Count} unfinished remux(es) from a run that was interrupted.\n\n";
 
@@ -297,6 +309,12 @@ public partial class RemuxWindow
                        + $"    {o.Reason}\n"
                        + $"    {Human(o.TempBytes)} against the original's {Human(o.OriginalBytes)}\n\n";
 
+            foreach (var o in lone)
+                msg += $"ONLY COPY  {Path.GetFileName(o.TempPath)}\n"
+                       + $"    {o.Reason}\n"
+                       + $"    {Human(o.TempBytes)}. Left alone whatever you choose - "
+                       + "rename it yourself once you have looked at it.\n\n";
+
             foreach (var o in bad)
                 msg += $"UNUSABLE  {Path.GetFileName(o.TempPath)}\n    {o.Reason}\n\n";
 
@@ -304,12 +322,22 @@ public partial class RemuxWindow
             {
                 msg += $"Yes  -  finish {good.Count} of them: archive the original and put the "
                        + "recovered file in its place (undoable from History)\n"
-                       + "No   -  delete every leftover and start again\n"
+                       + "No   -  delete the broken leftovers and start again\n"
                        + "Cancel  -  leave everything exactly as it is";
+            }
+            else if (bad.Count > 0)
+            {
+                msg += $"Yes  -  delete the {bad.Count} broken one(s)\nNo  -  leave them";
             }
             else
             {
-                msg += "None can be used.\n\nYes  -  delete them\nNo  -  leave them";
+                // Nothing to decide: everything here is either the only copy of
+                // something or already fine.
+                MessageBox.Show(this, msg, "Unfinished remux found",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+
+                TxtStatus.Text = $"Left {orphans.Count} leftover file(s) alone.";
+                return;
             }
 
             var answer = MessageBox.Show(this, msg, "Unfinished remux found",
@@ -340,9 +368,26 @@ public partial class RemuxWindow
                 return;
             }
 
-            // "No" with usable files, or "Yes" when none were usable: discard all.
-            foreach (var o in orphans) TryDeleteOrphan(o.TempPath);
-            TxtStatus.Text = $"Deleted {orphans.Count} leftover file(s).";
+            // With nothing usable the question is only "delete them?", and the
+            // button says "No - leave them". It used to leave nothing: every
+            // answer that was not Cancel - and Cancel was not offered in that
+            // case - fell through to the loop below and deleted exactly the
+            // files the button had just promised to keep.
+            if (good.Count == 0 && answer != MessageBoxResult.Yes)
+            {
+                TxtStatus.Text = $"Left {orphans.Count} leftover file(s) alone.";
+                return;
+            }
+
+            // "No" with usable files, or "Yes" when none were usable: discard
+            // the broken ones. Never the only-copy ones - there is nothing to
+            // fall back on for those.
+            foreach (var o in bad) TryDeleteOrphan(o.TempPath);
+
+            TxtStatus.Text = lone.Count > 0
+                ? $"Deleted {bad.Count} leftover file(s), and left {lone.Count} that "
+                  + "no longer have an original to fall back on."
+                : $"Deleted {bad.Count} leftover file(s).";
         }
         catch (Exception ex)
         {
@@ -562,12 +607,29 @@ public partial class RemuxWindow
             SkippedList.ItemsSource = plan.Skipped.Select(s => $"Skipped - {s}").ToList();
             SkippedList.Visibility = plan.Skipped.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-            // Deliberately not set here. BuildRows ends by calling
-            // UpdateRemuxEnabled, which derives both from the ticks and keeps
-            // deriving them as the user changes their mind.
-            if (!plan.HasWork)
+            // Mostly not set here. BuildRows ends by calling UpdateRemuxEnabled,
+            // which derives the status and the button from the ticks and keeps
+            // deriving them as the user changes their mind - so this only
+            // speaks when it found nothing to press. It can find work that is
+            // not a dropped track, and telling somebody their files "already
+            // match your keep rules" over the top of a live Remux button reads
+            // as a refusal.
+            if (!plan.HasWork && !BtnRemux.IsEnabled)
                 TxtStatus.Text = "Every file already matches your keep rules. "
                                  + "Untick a track below to remove it anyway.";
+
+            // The rules have been answered; give their third of the window to
+            // the track list, which is the part that gets scrolled through.
+            // The warning has been read by now too.
+            if (plan.Groups.Count > 0)
+            {
+                Rules.IsExpanded = false;
+                Warning.IsOpen = false;
+            }
+
+            // Only worth offering when there is more than one thing to choose
+            // between.
+            PickAll.Visibility = plan.Groups.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex)
         {
@@ -642,9 +704,21 @@ public partial class RemuxWindow
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var title = folders.Count == 1 && !string.IsNullOrWhiteSpace(folders[0])
-                ? folders[0]
-                : g.FileCount == 1 ? g.Files[0].FileName : $"{folders.Count} folders";
+            var named = folders.Where(f => !string.IsNullOrWhiteSpace(f)).ToList();
+
+            // Name them. "2 folders" was true and useless: files are grouped by
+            // track layout alone, so a group can span shows that have nothing
+            // to do with each other, and the header gave no way to tell whose
+            // files were about to be rewritten without expanding it. Reported
+            // as Strange New Worlds appearing to hold season 1 episodes - they
+            // were Stranger Things, sharing a layout and a header.
+            var title = named.Count == 1
+                ? named[0]
+                : g.FileCount == 1
+                    ? g.Files[0].FileName
+                    : named.Count is > 1 and <= 3
+                        ? string.Join(", ", named)
+                        : $"{named.Count} folders";
 
             var stale = g.Files.Where(f => f.Info.TitleIsStale).ToList();
 
@@ -703,10 +777,23 @@ public partial class RemuxWindow
     /// Mirror of the plan-building in OnRemux, so the button and the status line
     /// always agree with what pressing it would actually do.
     /// </summary>
+    /// <summary>Take part in the remux, all of them or none.</summary>
+    private void OnIncludeAll(object sender, RoutedEventArgs e) => Include(true);
+
+    private void OnIncludeNone(object sender, RoutedEventArgs e) => Include(false);
+
+    private void Include(bool on)
+    {
+        foreach (var g in _groups) g.Include = on;
+
+        UpdateRemuxEnabled();
+    }
+
     private void UpdateRemuxEnabled()
     {
         var files = 0;
         var drops = 0;
+        var titles = 0;
         var blocked = 0;
         var blockedVideo = 0;
 
@@ -719,7 +806,15 @@ public partial class RemuxWindow
             foreach (var info in row.Infos)
             {
                 var drop = info.Streams.Count(s => s.Kind != StreamKind.Other && !keepIdx.Contains(s.Index));
-                if (drop == 0) continue;
+
+                // Dropping tracks is not the only thing a remux does. A file
+                // whose embedded title is still its old scene name has real
+                // work waiting - the window says so, in as many words, right
+                // above a Remux button that used to stay dead because nothing
+                // was being removed.
+                var retitle = info.TitleIsStale;
+
+                if (drop == 0 && !retitle) continue;
 
                 // Never strip a file to no audio at all.
                 if (info.Audio.Any() && !info.Audio.Any(a => keepIdx.Contains(a.Index)))
@@ -738,13 +833,17 @@ public partial class RemuxWindow
 
                 files++;
                 drops += drop;
+                if (retitle) titles++;
             }
         }
 
         BtnRemux.IsEnabled = files > 0;
 
         TxtStatus.Text = files > 0
-            ? $"{files} file(s) would change, {drops} track(s) removed. Press Remux."
+            ? drops > 0
+                ? $"{files} file(s) would change, {drops} track(s) removed. Press Remux."
+                : $"{titles} file(s) would change - no tracks removed, but the embedded title "
+                  + "is reset to match the filename. Press Remux."
             : blockedVideo > 0
                 ? "That would leave a file with no video at all. Keep at least one video track."
             : blocked > 0
@@ -797,7 +896,7 @@ public partial class RemuxWindow
                 var keep = info.Streams.Where(s => s.Kind == StreamKind.Other || keepIdx.Contains(s.Index)).ToList();
                 var drop = info.Streams.Where(s => s.Kind != StreamKind.Other && !keepIdx.Contains(s.Index)).ToList();
 
-                if (drop.Count == 0) continue;
+                if (drop.Count == 0 && !info.TitleIsStale) continue;
 
                 if (!keep.Any(s => s.Kind == StreamKind.Audio) && info.Audio.Any())
                     continue;   // guarded in the planner too, but never trust the UI alone
@@ -987,7 +1086,17 @@ public partial class RemuxWindow
 
         // Weight by size: a 25 GB file is not one step of the same length as a
         // 700 MB one, and a file count alone can't say how long is left.
-        var totalBytes = Math.Max(1, plans.Sum(p => SafeSize(p.Info.Path)));
+        //
+        // Measured once, up front. Asking the filesystem again as the run went
+        // along asked about files the run had already archived or recycled, so
+        // every finished file weighed nothing, the total never advanced, and
+        // the bar dropped back to zero on each file and never reached the end.
+        var sizes = plans.ToDictionary(
+            p => p.Info.Path, p => SafeSize(p.Info.Path), StringComparer.OrdinalIgnoreCase);
+
+        long SizeOf(string path) => sizes.TryGetValue(path, out var n) ? n : 0;
+
+        var totalBytes = Math.Max(1, sizes.Values.Sum());
         long bytesDone = 0;
         var started = DateTime.UtcNow;
         var lastIndex = 0;
@@ -1002,7 +1111,7 @@ public partial class RemuxWindow
                 if (p.Index > lastIndex)
                 {
                     if (lastIndex > 0)
-                        bytesDone += SafeSize(CurrentBatch()[lastIndex - 1].Info.Path);
+                        bytesDone += SizeOf(CurrentBatch()[lastIndex - 1].Info.Path);
                     lastIndex = p.Index;
                 }
 
@@ -1011,7 +1120,7 @@ public partial class RemuxWindow
                 // Count the file in flight at however far through it is, rather
                 // than as nothing until it finishes. A single large file used to
                 // leave the bar frozen at 0% for its whole duration.
-                var currentBytes = SafeSize(CurrentBatch().ElementAtOrDefault(p.Index - 1)?.Info.Path ?? "");
+                var currentBytes = SizeOf(CurrentBatch().ElementAtOrDefault(p.Index - 1)?.Info.Path ?? "");
                 var partial = p.Percent is { } pct ? currentBytes * pct / 100.0 : 0;
 
                 var fraction = Math.Clamp((bytesDone + partial) / totalBytes, 0, 1);
@@ -1029,7 +1138,7 @@ public partial class RemuxWindow
                 Merge(result, await mkv.ExecuteAsync(viaMkv, progress, ct, stopCt));
                 offset = viaMkv.Count;
                 lastIndex = 0;
-                bytesDone = viaMkv.Sum(p => SafeSize(p.Info.Path));
+                bytesDone = viaMkv.Sum(p => SizeOf(p.Info.Path));
             }
 
             if (viaFfmpeg.Count > 0 && !ct.IsCancellationRequested && !stopCt.IsCancellationRequested)
@@ -1049,10 +1158,19 @@ public partial class RemuxWindow
                 into.Stopped |= from.Stopped;
             }
 
+            // "Reclaimed" only when something was actually freed. With the
+            // originals archived - which is the default - they are moved to a
+            // folder on the same volume, so free space does not go up by the
+            // saving; it goes down by the size of the new file. The number is
+            // still worth saying, as what deleting the archive would give back.
+            var saving = _settings.ArchiveOriginals
+                ? $" {Human(result.BytesReclaimed)} will be freed when you delete the archived originals."
+                : $" Reclaimed {Human(result.BytesReclaimed)}.";
+
             var msg = $"Remuxed {result.Succeeded}."
                       + (result.Failed > 0 ? $" Failed {result.Failed}." : "")
                       + (result.Skipped > 0 ? $" Skipped {result.Skipped}." : "")
-                      + $" Reclaimed {Human(result.BytesReclaimed)}."
+                      + saving
                       + (result.Stopped || stopCt.IsCancellationRequested
                           ? $"\n\nStopped early - {grandTotal - result.Succeeded - result.Failed} "
                             + "file(s) were left untouched."
@@ -1070,6 +1188,7 @@ public partial class RemuxWindow
             MessageBox.Show(this, msg, "Remux complete", MessageBoxButton.OK,
                 result.Failed > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
 
+            FollowTheFiles();
             OnAnalyse(this, new RoutedEventArgs());   // refresh from disk
         }
         catch (OperationCanceledException)
@@ -1143,6 +1262,25 @@ public partial class RemuxWindow
         BtnAbort.IsEnabled = false;
         BtnStopAfter.IsEnabled = false;
         TxtStatus.Text = "Aborting...";
+    }
+
+    /// <summary>
+    /// Point the window's file list at where the files are now.
+    ///
+    /// Remuxing to MKV changes the extension, so the paths this window was
+    /// opened with stop existing. Re-analysing them found nothing and emptied
+    /// the window, which reads as the remux having destroyed everything.
+    /// </summary>
+    private void FollowTheFiles()
+    {
+        for (var i = 0; i < _files.Count; i++)
+        {
+            var was = _files[i];
+            if (File.Exists(was)) continue;
+
+            var now = Path.ChangeExtension(was, ".mkv");
+            if (File.Exists(now)) _files[i] = now;
+        }
     }
 
     private static long SafeSize(string path)

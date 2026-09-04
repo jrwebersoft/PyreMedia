@@ -157,6 +157,12 @@ internal static class Manual
                 <li><a href="#gaps">Filling an album's gaps from elsewhere</a></li>
                 <li><a href="#tags">Tag problems</a></li>
                 <li><a href="#books">Audiobooks</a></li>
+                <li><a href="#comics">Comics and ebooks</a></li>
+                <li><a href="#shelf">Where comics and books go</a></li>
+                <li><a href="#reader">Looking through a comic</a></li>
+                <li><a href="#adverts">Adverts, and pages nobody printed</a></li>
+                <li><a href="#words">Reading the words</a></li>
+                <li><a href="#loose">Loose pages and leftovers</a></li>
                 <li><a href="#tidy">Cleaning up, and quarantine</a></li>
                 <li><a href="#nfo">.nfo files and Kodi</a></li>
                 <li><a href="#history">History and undo</a></li>
@@ -841,6 +847,202 @@ internal static class Manual
             the disc as the album and the publisher as the artist - so the author and title
             come from what the whole folder says.</p>
 
+            <h2 id="comics">Comics and ebooks</h2>
+
+            <p>The <strong>Books</strong> tab handles comics and ebooks. It works the same
+            way as the rest of the program: scan, look at what it found, approve, apply,
+            and undo from History if you disagree afterwards.</p>
+
+            {{IMG_BOOKS}}
+
+            <p>A comic is a <code>.cbz</code> or a <code>.cbr</code> - a zip or a RAR full
+            of page images, with the pages in filename order. An ebook is an
+            <code>.epub</code>, <code>.mobi</code>, <code>.azw3</code>, <code>.pdf</code>
+            or <code>.djvu</code>.</p>
+
+            <p>The two extensions lie often enough that PyreMedia does not trust them. A
+            file is opened and identified by what its first few bytes actually are, so a
+            RAR named <code>.cbz</code> - which is common, and which most readers choke on -
+            is read correctly anyway. Against one real library, 8,342 of 37,425 comics were
+            RAR, and every one of them would have been invisible without this.</p>
+
+            <h3>Where the details come from</h3>
+
+            <p>Most scanned comics carry a <code>ComicInfo.xml</code> inside them, written
+            by whoever scanned it. That is a fact where the filename is a guess, so it wins.
+            Series, issue number, year, page count and the count of issues in the run all
+            come from there when it is present.</p>
+
+            <p>One trap is worth knowing about, because nearly every comic in the wild is
+            affected: in <code>ComicInfo.xml</code> the field called <code>Volume</code>
+            usually holds the <em>year the series started</em>, not a volume number, while
+            <code>Year</code> holds the cover date of that issue. PyreMedia reads it the way
+            the files are actually written rather than the way the field is named.</p>
+
+            <p>An ebook is read from the inside too - an <code>.epub</code> is a zip with
+            its own title, author, publisher, language, ISBN and series inside it. Where
+            that fails, the filename is used.</p>
+
+            <div class="note">
+            <p><strong>Both orders of filename are understood.</strong> Book files are
+            written as "Title - Author" by some shops and "Author - Title" by others, and
+            both turn up in the same folder. PyreMedia decides by which side looks like a
+            person written surname-first: in "Angel Time - Rice_ Anne" the author is on the
+            right, in "Crichton, Michael - Scratch One" it is on the left. A title that
+            happens to contain a comma - "Vittorio, the Vampire" - is not mistaken for a
+            name, because what follows the comma is an article rather than a first name.
+            When neither side says, it assumes title first, which is what Calibre writes.</p>
+            </div>
+
+            <h3>Publisher</h3>
+
+            <p>Publisher is written for comics and never for ebooks. A comic's publisher is
+            part of how people file them - Marvel, DC, Image - and a book's is not.</p>
+
+            <h2 id="shelf">Where comics and books go</h2>
+
+            <p>Comics file by series:</p>
+
+            <pre>{series} ({year})/{series} ({year}) #{issue}</pre>
+
+            <p>and books by author:</p>
+
+            <pre>{author}/{title}</pre>
+
+            <p>The issue number is padded to three digits so a hundred issues sort in
+            reading order rather than as 1, 10, 100, 11. Both formats are changeable in
+            Settings, on the Books tab.</p>
+
+            <h3>What it will not guess</h3>
+
+            <p>A comic with no issue number is <strong>held</strong> rather than filed
+            somewhere plausible. So is one whose series cannot be worked out. Held items
+            appear in the list with a reason attached, and nothing happens to them - a file
+            left where it is can be dealt with later, and a file confidently put in the
+            wrong place is a problem you have to find first.</p>
+
+            <p>The shelf view groups issues into series and says what is missing:
+            "12 issues, missing #4 and #7" or "6 issues - the complete run of 6". Where the
+            file says how many issues the run has, the run is counted from what is actually
+            there, so a series that opens at #0 - which Valiant and the nineties Image books
+            often do - reads as complete when it is complete.</p>
+
+            <h2 id="reader">Looking through a comic</h2>
+
+            <p>Select a comic and the pane on the right shows it. <strong>Read</strong>, or
+            a double-click, opens the full reader.</p>
+
+            {{IMG_READER}}
+
+            <p>The reader exists for one job: deciding whether a page belongs in the comic.
+            That needs a page you can actually read, so there are three ways to size it -
+            whole page, fit to width, and actual size - and <strong>Z</strong> cycles them.
+            Fit-page is for seeing a page's shape; it is not enough to read lettering by. A
+            comic page is around 2000&times;3000, so even filling a monitor is a three-times
+            reduction and the small print on an advert is gone.</p>
+
+            <p><strong>F11</strong>, or a double-click on the page, goes full screen, and
+            full screen switches to fit-width by itself for the same reason. The arrow keys
+            turn pages, <strong>space</strong> marks the current one, and <strong>Escape</strong>
+            comes back.</p>
+
+            <p>The page list on the right can be dragged wider, because scanners give pages
+            names like <code>wildc.a.t.s._n1-c01.jpg</code> and no fixed width suits
+            everybody. In a narrow window the name is trimmed and the whole thing appears on
+            hovering - the page itself keeps the room.</p>
+
+            <h3>Renaming the pages</h3>
+
+            <p><strong>Rename the pages</strong> gives every page inside the comic a plain
+            numbered name. The order is not changed - they are renumbered in the order they
+            already read - and a copy of the comic is kept beside it first. This is tidiness
+            rather than a repair: across 250 comics measured, none had pages that read in a
+            different order from their names.</p>
+
+            <h2 id="adverts">Adverts, and pages nobody printed</h2>
+
+            <p>Two kinds of page are worth removing from a scanned comic. An
+            <strong>advert</strong> is a page the publisher printed that you may not want,
+            and a <strong>scanner page</strong> is a credits or release-info page the
+            scanning group added, which was never in the comic at all.</p>
+
+            <p>Where the file already marks its adverts, <strong>Tick the marked
+            adverts</strong> uses that: somebody read the comic to write it down, and that
+            beats any guess made from the pixels afterwards. The button is off unless the
+            file has something to say.</p>
+
+            <p>For everything else - which is nearly everything - <strong>Read the pages and
+            suggest</strong> reads each page and ticks the ones whose words say they are
+            advertising, with the reason shown beside the page. Prices, "order now", coupon
+            wording, a scanning group's own credit line.</p>
+
+            <div class="note">
+            <p><strong>It measures each comic against itself.</strong> An earlier version
+            used a fixed idea of how comics are lettered - capitals, few long words - and
+            called two thirds of a modern mixed-case comic advertising. It now works out how
+            much prose that particular comic's ordinary pages carry and looks for a
+            departure from it. On one test comic this took the false positives from 13 to 2.</p>
+            </div>
+
+            <p>Nothing is removed without being ticked, and the page is shown at a size you
+            can read before you decide. A page judged too small to read is a page judged
+            badly.</p>
+
+            <p>Two things can then be done with the ticks. <strong>Save ticks as
+            adverts</strong> writes them into the comic's own <code>ComicInfo.xml</code>,
+            which removes nothing and lets every other reader see the answer afterwards.
+            <strong>Remove ticked pages</strong> takes them out, keeping a copy of the whole
+            comic beside it first and recording the change in History.</p>
+
+            <div class="warn">
+            <p><strong>A page the file itself calls "Other" is never offered for
+            deletion.</strong> That is the format's catch-all, and taggers use it for pinup
+            galleries and sketchbook pages - things the publisher printed. Only pages the
+            scanning group added are offered.</p>
+            </div>
+
+            <h2 id="words">Reading the words</h2>
+
+            <p><strong>Read the words</strong> writes two files beside each comic or book: a
+            <code>.script.nfo</code> for another program to index, page by page and saying
+            which pages are advertising, and a plain <code>.txt</code> of the same words for
+            anything that only wants text.</p>
+
+            <p>Books carry their own text, so those are exact. Comics are read a page at a
+            time by Windows' own OCR, at roughly a tenth of a second a page - so a shelf is
+            measured in hours, and the dialog says how long before it starts. Nothing leaves
+            the machine.</p>
+
+            <p>Comic lettering is drawn rather than typeset, so the text comes out rough. It
+            is good for finding which issue something happens in and not for reading: of ten
+            named characters searched for across a test run, nine were findable.</p>
+
+            <p>There is a <strong>Stop</strong> button while it runs, and it stops after the
+            file it is on rather than half way through one.</p>
+
+            <h2 id="loose">Loose pages and leftovers</h2>
+
+            <p><strong>Tidy up</strong> finds three things around the edges of a comic
+            shelf, lists them in one place, and ticks nothing by default.</p>
+
+            {{IMG_TIDY}}
+
+            <p><strong>Pages inside a comic</strong> - adverts and scanner pages already
+            found by "read the words", offered for removal without opening each comic
+            again.</p>
+
+            <p><strong>A folder of loose images</strong> that is plainly one issue, sitting
+            beside <code>.cbz</code> files that are the same thing zipped. These are packed
+            into a <code>.cbz</code>, and the result is read back and checked before
+            anything else happens. The original images are never deleted.</p>
+
+            <p><strong>Images a release left behind</strong> - screenshot folders, proof
+            images, sample scans. Artwork names are refused outright, and a folder that is
+            nothing but images is skipped, because that is a comic waiting to be packed
+            rather than litter.</p>
+
+            <p>All of it undoes from History.</p>
+
             <h2 id="tidy">Cleaning up, and quarantine</h2>
 
             <p><strong>Nothing is ever deleted.</strong> Redundant copies and anything the
@@ -1274,7 +1476,10 @@ internal static class Manual
             .Replace("{{IMG_CONFLICT}}", Img("conflict", "Resolving a name that is already taken."))
             .Replace("{{IMG_REMUX}}", Img("remux", "Remux: files grouped by the tracks they hold."))
             .Replace("{{IMG_AUDIO}}", Img("audio", "The Audio tab after a scan: albums grouped, with what it proposes for each file."))
-            .Replace("{{IMG_CONSISTENCY}}", Img("consistency", "Files that disagree with the rest of their album. Every row starts unticked."));
+            .Replace("{{IMG_CONSISTENCY}}", Img("consistency", "Files that disagree with the rest of their album. Every row starts unticked."))
+            .Replace("{{IMG_BOOKS}}", Img("books", "The Books tab after a scan: the shelf on the left, what would change in the middle, the chosen issue on the right."))
+            .Replace("{{IMG_READER}}", Img("reader", "The reader, with the page list beside it and what was found on the page above."))
+            .Replace("{{IMG_TIDY}}", Img("tidy", "Tidy up: adverts inside comics, folders of loose pages, and images a release left behind. Nothing is ticked."));
     }
 
     private static string Escape(string s) =>

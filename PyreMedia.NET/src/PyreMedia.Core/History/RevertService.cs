@@ -23,7 +23,15 @@ public sealed class RevertCandidate
 
     public bool CanRevert => State == RevertState.Ready;
 
-    public string Describe() => State switch
+    /// <summary>
+    /// What would happen to this entry, in a phrase.
+    ///
+    /// A property rather than a method because the History window binds to it,
+    /// and WPF resolves a binding path against properties only - as a method
+    /// the binding failed without a word and every row's "Can revert" cell
+    /// rendered empty.
+    /// </summary>
+    public string Describe => State switch
     {
         RevertState.Ready => $"{Entry.NewName}  ->  {Entry.OldName}",
         RevertState.SourceMissing => $"'{Entry.NewName}' is no longer there",

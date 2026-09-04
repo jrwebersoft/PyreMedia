@@ -1,13 +1,45 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!--
+      Windows, because the library already is. It shells to winget, writes to
+      %APPDATA%, reasons about drive letters, and now reads the App Paths key -
+      which is how Windows itself answers "where is vlc.exe" for a program that
+      registered properly and never touched PATH. Claiming to be portable was
+      a fiction that cost a real bug.
+    -->
+    <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="PyreMedia.Tests" />
+  </ItemGroup>
+
+  <!--
+    The only two packages this library depends on, and neither was added lightly -
+    everything else here is written against the framework alone.
+
+    The Grand Comics Database publishes its data as a SQLite file and nothing
+    else: no API, no export in another format. Reading it means speaking SQLite,
+    and hand-rolling that would be far worse than taking Microsoft's own
+    provider. It brings a small native library per platform, which is the price.
+
+    SharpCompress reads RAR, which .NET does not and never will - RAR's format is
+    documented but its compression is proprietary enough that no framework ships
+    a decoder. It matters because .cbr is RAR: measured against a real library,
+    8,342 of 37,425 comics were .cbr and every one of them was invisible without
+    this. MIT licensed, pure managed, no native dependency.
+
+    Pinned at 0.48.0 or later on purpose. Everything before it carries
+    GHSA-6c8g-7p36-r338, a path-traversal in WriteToDirectory - which this
+    program would never call, since it reads entries into memory and never
+    extracts to disk, but taking the patched version costs nothing.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="SharpCompress" Version="0.48.0" />
   </ItemGroup>
 
 </Project>

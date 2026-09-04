@@ -94,17 +94,29 @@ public partial class ArtworkWindow
     private string? _langFilter;          // null = all, "" = textless
     private bool _loading;
 
+    /// <summary>
+    /// Where a series' artwork goes, or null for a film.
+    ///
+    /// A poster describes a whole series, so for television it belongs in the
+    /// show's folder and is written once. Beside each episode it would be the
+    /// same picture fifty times over, which is what an episode's own frame is
+    /// there to avoid.
+    /// </summary>
+    private readonly string? _seriesFolder;
+
     public ArtworkWindow(
         PyreMediaSettings settings,
         string title,
         IReadOnlyList<string> targetFiles,
-        Func<CancellationToken, Task<ArtworkSet>> fetch)
+        Func<CancellationToken, Task<ArtworkSet>> fetch,
+        string? seriesFolder = null)
     {
         InitializeComponent();
 
         _settings = settings;
         _targets = targetFiles;
         _fetch = fetch;
+        _seriesFolder = seriesFolder;
 
         LangChips.ItemsSource = Languages;
         Summary.ItemsSource = Pills;
@@ -379,19 +391,34 @@ public partial class ArtworkWindow
 
         TxtStatus.Text = pending == 0
             ? "Nothing to save yet - click an image above."
-            : $"{pending} image(s) will be written beside "
-              + (_targets.Count == 1 ? "this file." : $"all {_targets.Count} files.");
+            : _seriesFolder is { } folder
+                ? $"{pending} image(s) will be written into {Path.GetFileName(folder)}, "
+                  + "where they cover the whole series."
+                : $"{pending} image(s) will be written beside "
+                  + (_targets.Count == 1 ? "this file." : $"all {_targets.Count} files.");
     }
 
     /// <summary>
-    /// Whatever is saved beside the file already, if it was chosen here. It
-    /// cannot be read back out of the image, so it is remembered when written.
+    /// Every place one kind of image should be written.
+    ///
+    /// For a series that is one file in the show's folder. For a film it is one
+    /// beside each video, which is how a folder holding two films keeps two
+    /// posters.
+    /// </summary>
+    private IEnumerable<string> Destinations(ArtKind kind) =>
+        _seriesFolder is { } folder
+            ? [ArtworkWriter.FolderPathFor(folder, kind)]
+            : _targets.Select(t => ArtworkWriter.PathFor(t, kind));
+
+    /// <summary>
+    /// Whatever is saved already, if it was chosen here. It cannot be read back
+    /// out of the image, so it is remembered when written.
     /// </summary>
     private string? CurrentlySaved(ArtKind kind)
     {
-        if (_targets.Count == 0) return null;
+        var path = Destinations(kind).FirstOrDefault();
+        if (path is null) return null;
 
-        var path = ArtworkWriter.PathFor(_targets[0], kind);
         return File.Exists(path) ? _settings.ChosenArtwork.GetValueOrDefault(path) : null;
     }
 
@@ -447,11 +474,13 @@ public partial class ArtworkWindow
                 var pick = tiles.FirstOrDefault(t => t.IsChosen && !t.IsCurrent);
                 if (pick is null) continue;
 
-                foreach (var target in _targets)
+                // A series has one poster and it goes in the show's folder. A
+                // film's goes beside the film, which is where a film's belongs.
+                foreach (var path in Destinations(kind))
                 {
-                    TxtStatus.Text = $"Saving {kind}  -  {Path.GetFileName(target)}";
+                    TxtStatus.Text = $"Saving {kind}  -  {Path.GetFileName(path)}";
 
-                    var r = await ArtworkWriter.WriteAsync(_http, target, kind, pick.Option.Url, forced);
+                    var r = await ArtworkWriter.WriteToAsync(_http, path, kind, pick.Option.Url, forced);
 
                     if (r.Outcome == ArtworkWriter.Outcome.Written)
                     {
@@ -461,7 +490,7 @@ public partial class ArtworkWindow
                     else if (r.Outcome == ArtworkWriter.Outcome.Failed)
                     {
                         failed++;
-                        AppLog.Info($"artwork: {Path.GetFileName(target)} {kind} - {r.Detail}");
+                        AppLog.Info($"artwork: {Path.GetFileName(path)} {kind} - {r.Detail}");
                     }
                 }
 

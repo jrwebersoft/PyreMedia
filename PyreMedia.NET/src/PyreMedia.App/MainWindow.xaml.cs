@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using PyreMedia.Core;
@@ -29,6 +29,7 @@ public partial class MainWindow
         // The audio pane keeps its own state but shares the settings file and
         // the history, so a music run undoes from the same History window.
         MusicPane.Attach(_vm.Settings, _vm.History);
+        BooksPane.Attach(_vm.Settings, _vm.History);
 
         // The view model finds the collisions; the shell asks about them.
         _vm.ResolveConflicts = conflicts =>
@@ -136,10 +137,29 @@ public partial class MainWindow
             return;
         }
 
-        foreach (var (root, files) in byRoot.Where(kv => kv.Value.Count > 0))
+        // Split by what each file is, not by which list its staging folder came
+        // from. There is only one folder list now - setup writes MovieFolders
+        // empty and everything is added to TvFolders - so asking which list the
+        // root belonged to always answered "TV", and every finished film was
+        // moved into the TV library. MovieDestination was unreachable.
+        //
+        // An episode is a file whose name carries a season and episode number,
+        // which is the same test the planner uses to decide what it is.
+        var groups =
+            from pair in byRoot
+            where pair.Value.Count > 0
+            from file in pair.Value
+            group file by (Root: pair.Key,
+                           Tv: PyreMedia.Core.Naming.EpisodeMatcher.Parse(
+                                   Path.GetFileName(file)) is not null)
+            into g
+            select g;
+
+        foreach (var group in groups.OrderBy(g => g.Key.Root).ThenByDescending(g => g.Key.Tv))
         {
-            var tv = _vm.Settings.TvFolders.Any(f =>
-                string.Equals(f, root, StringComparison.OrdinalIgnoreCase));
+            var root = group.Key.Root;
+            var tv = group.Key.Tv;
+            var files = group.ToList();
 
             var kind = tv ? LibraryKind.Tv : LibraryKind.Movie;
             var destination = _vm.Settings.DestinationFor(kind);
@@ -239,7 +259,10 @@ public partial class MainWindow
         if (move.By == 0) return;
 
         if (move.Target == ScrollTarget.Inside && inner is not null)
-            inner.ScrollToVerticalOffset(inner.VerticalOffset + move.By);
+            inner.ScrollToVerticalOffset(
+                inner.VerticalOffset
+                + SectionScroll.InnerStep(inner.CanContentScroll, move.By,
+                                          SystemParameters.WheelScrollLines));
         else
             PanelScroll.ScrollToVerticalOffset(PanelScroll.VerticalOffset + move.By);
 
@@ -349,11 +372,22 @@ public partial class MainWindow
             StatusPanel.Margin = new Thickness(20, 0, 0, 0);
             PanelGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            PanelGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(270), MinWidth = 200 });
+            // Shares of the window, not fixed strips.
+            //
+            // These are built here rather than taken from the XAML - this method
+            // clears the column definitions and rebuilds them - so the widths in
+            // the markup are decoration and these are the real ones. At 270 and
+            // 330 pixels the library and the match panel stayed those sizes on a
+            // three-thousand-pixel monitor while every spare pixel went to the
+            // pane that needed it least.
+            PanelGrid.ColumnDefinitions.Add(new ColumnDefinition
+                { Width = new GridLength(1.1, GridUnitType.Star), MinWidth = 220 });
             PanelGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-            PanelGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(330), MinWidth = 260 });
+            PanelGrid.ColumnDefinitions.Add(new ColumnDefinition
+                { Width = new GridLength(1.3, GridUnitType.Star), MinWidth = 280 });
             PanelGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-            PanelGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 360 });
+            PanelGrid.ColumnDefinitions.Add(new ColumnDefinition
+                { Width = new GridLength(2.2, GridUnitType.Star), MinWidth = 360 });
 
             Place(CardLibrary, 0, 0);
             Place(CardMatch, 0, 2);
@@ -412,8 +446,9 @@ public partial class MainWindow
         if (dlg.ShowDialog(this) != true)
             return;
 
-        foreach (var path in dlg.FolderNames)
-            _vm.AddFolderCommand.Execute(path);
+        // All of them, then one scan. One command per folder started one scan
+        // per folder, and they raced each other into a duplicated library list.
+        _vm.AddFolders(dlg.FolderNames);
     }
 
     /// <summary>
@@ -432,8 +467,12 @@ public partial class MainWindow
     {
         if (_vm.SelectedItem is not { } item) return;
 
-        var file = item.Media.MainFile;
+        Play(item.Media.MainFile);
+    }
 
+    /// <summary>Open one file in the player, and say so or say why not.</summary>
+    private void Play(string file)
+    {
         var settings = _vm.Settings;
 
         if (PyreMedia.Core.Media.Preview.Open(
@@ -483,8 +522,47 @@ public partial class MainWindow
         OpenRemux([.. sel.Media.Files], sel.DisplayName);
     }
 
+    /// <summary>
+    /// Remux the one file on this row.
+    ///
+    /// Per file as well as per item, because a season is twenty files and
+    /// wanting to deal with one of them is the normal case - the episode with
+    /// the stray commentary track, the one that came from a different source.
+    /// Scoping to the whole show meant finding it again in a list of twenty.
+    /// </summary>
+    private void OnRemuxOne(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PlannedActionItem row) return;
+
+        // Where it is now, not where the plan would put it - nothing has moved
+        // yet, and the remux has to open the file that exists.
+        OpenRemux([row.Action.SourcePath], row.SourceName);
+    }
+
+    /// <summary>Play the one file on this row, to see what it actually is.</summary>
+    private void OnPlayOne(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PlannedActionItem row) return;
+
+        Play(row.Action.SourcePath);
+    }
+
+    /// <summary>Fetch this item's .nfo and artwork again, renaming nothing.</summary>
+    private async void OnRedoSidecars(object sender, RoutedEventArgs e)
+    {
+        // async void: an unhandled throw here would take the app down.
+        try { await _vm.RedoSidecarsAsync(); }
+        catch (Exception ex) { AppLog.Error("Redo sidecars", ex); }
+    }
+
     private void OpenRemux(List<string> files, string scope)
     {
+        // Disc images are organised, never opened. mkvmerge cannot write one
+        // and ffprobe reading one reads a filesystem rather than a stream, so
+        // an .iso in this list is a row that can only ever fail. Filtered at the
+        // one door all three entry points go through.
+        files = [.. files.Where(f => !_vm.Settings.IsDiscImage(f))];
+
         if (files.Count == 0)
         {
             MessageBox.Show(this, "Nothing scanned yet. Add a folder and press Scan first.",
@@ -534,8 +612,14 @@ public partial class MainWindow
             return;
         }
 
+        // For a series the artwork covers the whole run, so it goes in the show's
+        // folder rather than beside each episode. Same answer the .nfo writer
+        // uses, including its refusal to treat a scan root as a show.
+        var seriesFolder = isTv ? _vm.ShowFolderFor(files[0]) : null;
+
         new ArtworkWindow(_vm.Settings, match.Display, files,
-                          ct => _vm.GetArtworkAsync(isTv, id, ct)) { Owner = this }.ShowDialog();
+                          ct => _vm.GetArtworkAsync(isTv, id, ct),
+                          seriesFolder) { Owner = this }.ShowDialog();
     }
 
     /// <summary>
@@ -699,6 +783,7 @@ public partial class MainWindow
             // the moment the pane saves - which is the whole reason two editors
             // for one value are usually a mistake.
             MusicPane.Attach(_vm.Settings, _vm.History);
+            BooksPane.Attach(_vm.Settings, _vm.History);
         }
     }
 

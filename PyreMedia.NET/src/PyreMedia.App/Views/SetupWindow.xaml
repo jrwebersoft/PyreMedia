@@ -92,10 +92,24 @@
                                                        Tag="{Binding}" Click="OnInstallTool"
                                                        Visibility="{Binding CanInstall, Converter={StaticResource BoolToVis}}"
                                                        IsEnabled="{Binding IsIdle}" />
+                                            <!-- For the tools no package manager carries. Sending
+                                                 someone to a releases page asks them to pick the
+                                                 Windows build out of a dozen files, which is the
+                                                 one part of it that needs judgement and the one
+                                                 part this program already knows. -->
+                                            <ui:Button Content="{Binding FetchLabel}"
+                                                       Icon="{ui:SymbolIcon ArrowDownload24}"
+                                                       Appearance="Primary" Width="120" Margin="0,0,0,6"
+                                                       Tag="{Binding}" Click="OnFetchTool"
+                                                       Visibility="{Binding CanFetch, Converter={StaticResource BoolToVis}}"
+                                                       IsEnabled="{Binding IsIdle}"
+                                                       ToolTip="Downloads the Windows build from the author's own GitHub releases" />
+
                                             <ui:Button Content="Download" Icon="{ui:SymbolIcon Globe24}"
                                                        Appearance="Secondary" Width="120" Margin="0,0,0,6"
                                                        Tag="{Binding}" Click="OnOpenDownload"
-                                                       Visibility="{Binding ShowDownload, Converter={StaticResource BoolToVis}}" />
+                                                       Visibility="{Binding ShowDownload, Converter={StaticResource BoolToVis}}"
+                                                       ToolTip="Open the download page in a browser and fetch it yourself" />
                                             <ui:Button Content="Browse..." Icon="{ui:SymbolIcon FolderOpen24}"
                                                        Appearance="Secondary" Width="120"
                                                        Tag="{Binding}" Click="OnBrowseTool"
@@ -160,6 +174,71 @@
                             <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,10,0,0"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                        Text="Stored in settings.json under %APPDATA%\PyreMedia, on this machine only. Changeable later in Settings." />
+                        </StackPanel>
+                    </ui:Card>
+
+                    <!-- Comics have their own databases and nothing here said
+                         so, so a person who never opened Settings never found
+                         out that matching a comic run needed anything at all. -->
+                    <ui:Card Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="Comics" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,2,0,10"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Text="Only if you keep comics. TMDb knows nothing about them, so matching a run to a series - and finding out which issues you are missing - needs one of these instead. Any one is enough. Skip the lot if you have no comics." />
+
+                            <!-- First because it is the one that costs nothing
+                                 to ask: a local file, no key, no rate limit. -->
+                            <TextBlock Text="Grand Comics Database" FontWeight="SemiBold" FontSize="12" />
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,2,0,6"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Text="A database file you download once - no key, no rate limit, and it answers in milliseconds. It is a few gigabytes." />
+                            <ui:HyperlinkButton Content="Download it from comics.org/download"
+                                                NavigateUri="https://www.comics.org/download/"
+                                                Padding="0,2" Margin="0,0,0,4" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <ui:TextBox x:Name="TxtSetupGcd" Width="380"
+                                            PlaceholderText="Where you unpacked it" />
+                                <ui:Button Content="Browse..." Click="OnPickGcd"
+                                           Appearance="Secondary" Margin="8,0,0,0" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="TxtGcdSays" TextWrapping="Wrap" FontSize="11"
+                                       Margin="0,0,0,16" Visibility="Collapsed" />
+
+                            <TextBlock Text="Metron" FontWeight="SemiBold" FontSize="12" />
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,2,0,6"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Text="A free account rather than a key - five thousand questions a day." />
+                            <ui:HyperlinkButton Content="Sign up at metron.cloud"
+                                                NavigateUri="https://metron.cloud/accounts/signup/"
+                                                Padding="0,2" Margin="0,0,0,4" />
+
+                            <!-- The plain password box rather than the themed
+                                 one. No stronger reason than that this is the
+                                 variant that has been run and watched; the
+                                 themed one may be fine and has not been. -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <ui:TextBox x:Name="TxtSetupMetronUser" Width="220"
+                                            PlaceholderText="Username" />
+                                <PasswordBox x:Name="TxtSetupMetronPass" Width="220"
+                                             Margin="8,0,0,0" Padding="10,8" FontSize="14" />
+                            </StackPanel>
+
+                            <TextBlock Text="Username and password, not a key - Metron authenticates the account."
+                                       FontSize="11" Margin="0,0,0,16" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+                            <TextBlock Text="Comic Vine" FontWeight="SemiBold" FontSize="12" />
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,2,0,6"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Text="Two hundred questions an hour, and the key is revoked if it is used commercially." />
+                            <ui:HyperlinkButton Content="Get a key at comicvine.gamespot.com/api"
+                                                NavigateUri="https://comicvine.gamespot.com/api/"
+                                                Padding="0,2" Margin="0,0,0,4" />
+                            <ui:TextBox x:Name="TxtSetupComicVine"
+                                        PlaceholderText="Paste your Comic Vine key (optional)" />
                         </StackPanel>
                     </ui:Card>
                 </StackPanel>
@@ -277,14 +356,20 @@
                 <StackPanel x:Name="PageDone" Visibility="Collapsed">
                     <ui:Card Padding="24">
                         <StackPanel>
-                            <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="40"
+                            <ui:SymbolIcon x:Name="IconDone" Symbol="CheckmarkCircle24" FontSize="40"
                                            HorizontalAlignment="Center"
                                            Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
-                            <TextBlock Text="Ready" FontSize="20" FontWeight="SemiBold"
+                            <TextBlock x:Name="TxtDoneTitle" Text="Ready" FontSize="20" FontWeight="SemiBold"
                                        HorizontalAlignment="Center" Margin="0,10,0,0" />
                             <TextBlock x:Name="TxtSummary" TextWrapping="Wrap" TextAlignment="Center"
                                        Margin="0,12,0,0" FontSize="13"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                            <!-- Without a key nothing can be looked up, and a
+                                 green tick saying "Ready" agreed that was fine. -->
+                            <TextBlock x:Name="TxtDoneWarn" TextWrapping="Wrap" TextAlignment="Center"
+                                       Margin="0,12,0,0" FontSize="12" Visibility="Collapsed"
+                                       Foreground="{DynamicResource SystemFillColorCautionBrush}" />
                             <TextBlock Text="All of this can be changed later in Settings, and Settings has a Reset to defaults if you ever want to start over."
                                        TextWrapping="Wrap" TextAlignment="Center" Margin="0,16,0,0" FontSize="11"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" />

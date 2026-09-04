@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using PyreMedia.Core.Models;
 
 namespace PyreMedia.Core.Naming;
@@ -228,8 +228,32 @@ public static class NameFormatter
 
         string? year = null;
 
+        // A run of years is one fact, not two candidates.
+        //
+        // "Stranger Things (2016-2025) Complete Series" carries the years it
+        // ran between. Read one at a time, the loop below took the last as the
+        // year and left the first glued to the name - a show called "Stranger
+        // Things 2016", first aired 2025, which no provider has ever heard of.
+        // The first is when it started, which is what a series is indexed
+        // under; the second is when it stopped, which is not part of its name.
+        var range = Regex.Match(
+            title, @"(?<!\d)(?<from>(?:19|20)\d{2})\s*[-–—]\s*(?<to>(?:19|20)\d{2})(?!\d)");
+
+        if (range.Success)
+        {
+            var upto = title[..range.Index].Trim(' ', '-', '(', '[', '.', '_');
+
+            if (upto.Length > 0)
+            {
+                title = upto;
+                year = range.Groups["from"].Value;
+            }
+        }
+
         // Last year that still leaves a title, so "1923 (2022)" keeps "1923".
-        foreach (Match m in Regex.Matches(title, @"(?<!\d)(?<y>(?:19|20)\d{2})(?!\d)").Reverse())
+        foreach (Match m in year is not null
+                     ? []
+                     : Regex.Matches(title, @"(?<!\d)(?<y>(?:19|20)\d{2})(?!\d)").Reverse())
         {
             var before = title[..m.Index].Trim(' ', '-', '(', '[', '.', '_');
             if (before.Length == 0) continue;
@@ -245,21 +269,58 @@ public static class NameFormatter
         return (title, year);
     }
 
+    /// <summary>
+    /// Where an episode number sits in a name, and where a title stops.
+    ///
+    /// "episodio 3" and "episode 3" are in here as markers, not as titles: a
+    /// release that leads with SxxExx usually repeats the number in words
+    /// straight after the show's name, and that repeat is the only thing saying
+    /// where the name ends.
+    /// </summary>
+    private const string EpisodeMarker =
+        @"(?:^|[\s._-])(?:s\d{1,2}[\s._-]*e\d{1,3}|\d{1,2}x\d{1,3}|season[\s._-]*\d{1,2}"
+        + @"|episod(?:e|io|es|i)[\s._-]*\d{1,3}|s\d{1,2}(?![\d\w]))";
+
     public static string CleanTvSearchTerm(string rawName, string? filterPattern)
     {
         if (string.IsNullOrWhiteSpace(rawName))
             return string.Empty;
 
         // Drop an extension first - loose files arrive with one attached.
-        var stem = StripExtension(rawName);
+        var stem = StripSiteTag(StripExtension(rawName));
         if (string.IsNullOrWhiteSpace(stem)) stem = rawName;
 
-        var marker = Regex.Match(
-            stem,
-            @"[\s._-](?:s\d{1,2}[\s._-]*e\d{1,3}|\d{1,2}x\d{1,3}|season[\s._-]*\d{1,2}|s\d{1,2}(?![\d\w]))",
-            RegexOptions.IgnoreCase);
+        var marker = Regex.Match(stem, EpisodeMarker, RegexOptions.IgnoreCase);
 
-        var head = marker.Success && marker.Index > 0 ? stem[..marker.Index] : stem;
+        string head;
+
+        if (!marker.Success)
+        {
+            head = stem;
+        }
+        else if (marker.Index > 0)
+        {
+            head = stem[..marker.Index];
+        }
+        else
+        {
+            // The marker is the first thing in the name, so the title is what
+            // comes after it rather than before.
+            //
+            // The pattern used to require a separator in front, which meant a
+            // marker at position 0 never matched at all and the entire filename
+            // became the title: "S01E03 The Ghost in the Shell Episodio 03 Junk
+            // Jungle Ii + Megatech Machine (2026) WEBRip ..." was read as the
+            // name of a show, so it could never be recognised as the same
+            // series as the folder of it sitting beside it.
+            //
+            // Cut again at the next marker, which is where the episode's own
+            // title begins.
+            var rest = stem[marker.Length..];
+            var next = Regex.Match(rest, EpisodeMarker, RegexOptions.IgnoreCase);
+
+            head = next.Success && next.Index > 0 ? rest[..next.Index] : rest;
+        }
 
         var cleaned = Regex.Replace(head, @"[\s._]+", " ").Trim(' ', '-', '.');
 
@@ -268,6 +329,46 @@ public static class NameFormatter
             return CleanSearchTerm(stem, filterPattern);
 
         return cleaned;
+    }
+
+    /// <summary>
+    /// Domains that only a tracker puts in a filename.
+    ///
+    /// A whitelist rather than "any two to four letters", because the dotted
+    /// form is also how titles are written once separators are stripped: an
+    /// open rule turns "Dr. Who" into "Who". Even so it is only applied at the
+    /// front of a name or inside brackets - "Stuart.Fails.to.Save.the.Universe"
+    /// contains "Fails.to", and a rule that fired anywhere would eat it.
+    /// </summary>
+    private const string SiteTlds = "org|com|net|to|io|tv|me|cc|info|xyz|se|nu|eu|ru|is|ag|sx|pw|uk|co";
+
+    /// <summary>
+    /// Remove a tracker's own name from the front of a release, or a bracketed
+    /// one anywhere in it.
+    ///
+    /// "www.UIndex.org    -    Lanterns S01E01 Pilot" parsed as a show called
+    /// "www UIndex org - Lanterns", which meant it could never be recognised as
+    /// the same series as the "Lanterns" folder beside it, so the two were never
+    /// offered as one entry and the second folder kept its release name.
+    /// </summary>
+    public static string StripSiteTag(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return name;
+
+        // [EZTVx.to], [rarbg] with a domain in it - brackets make it unambiguous.
+        var cut = Regex.Replace(name, @"\[[^\]]*\.(?:" + SiteTlds + @")[^\]]*\]", " ",
+                                RegexOptions.IgnoreCase);
+
+        // www.anything.tld at the front, with whatever separator follows it.
+        cut = Regex.Replace(cut, @"^\s*www\.[\w-]+\.[a-z]{2,6}\b[\s._-]*", "",
+                            RegexOptions.IgnoreCase);
+
+        // A bare domain at the front, but only where a dash separates it from
+        // the title - that dash is what makes it a prefix rather than a word.
+        cut = Regex.Replace(cut, @"^\s*[\w-]{2,}\.(?:" + SiteTlds + @")\s*[-–]+\s*", "",
+                            RegexOptions.IgnoreCase);
+
+        return string.IsNullOrWhiteSpace(cut) ? name : cut;
     }
 
     /// <summary>
@@ -280,7 +381,7 @@ public static class NameFormatter
         if (string.IsNullOrWhiteSpace(rawName))
             return string.Empty;
 
-        var term = rawName;
+        var term = StripSiteTag(rawName);
 
         if (!string.IsNullOrWhiteSpace(filterPattern))
         {

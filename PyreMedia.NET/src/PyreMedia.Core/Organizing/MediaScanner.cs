@@ -1,4 +1,4 @@
-using PyreMedia.Core.Models;
+﻿using PyreMedia.Core.Models;
 using PyreMedia.Core.Naming;
 
 namespace PyreMedia.Core.Organizing;
@@ -251,10 +251,25 @@ public sealed class MediaScanner(PyreMediaSettings settings)
     /// Scan every configured root (TV and movie lists both) and classify what's
     /// found. A folder is TV if any video inside parses as a season/episode.
     /// </summary>
-    public IReadOnlyList<MediaItem> Scan(IList<string>? problems = null, CancellationToken ct = default)
+    /// <param name="say">
+    /// Which folder is being looked at now.
+    ///
+    /// There is no total to count against here and there should not be one: the
+    /// only way to know how many folders a library has is to walk it, and
+    /// walking it is the whole job. So this says where it has got to rather
+    /// than pretending to a fraction - which is more use anyway when a scan
+    /// stalls, because it names the folder that stalled it.
+    /// </param>
+    public IReadOnlyList<MediaItem> Scan(
+        IList<string>? problems = null,
+        IProgress<string>? say = null,
+        CancellationToken ct = default)
     {
         var found = new List<MediaItem>();
-        var exts = settings.VideoExtensions;
+
+        // What belongs to an item, which is not the same as what can be opened:
+        // a disc image is named and filed like any film and never read.
+        var exts = settings.ScannedExtensions;
         var subs = settings.SubtitleExtensions;
 
         bool IsVideo(string f)
@@ -279,6 +294,8 @@ public sealed class MediaScanner(PyreMediaSettings settings)
                 problems?.Add($"Folder not found (skipped): {root}");
                 continue;
             }
+
+            say?.Report(root);
 
             try
             {
@@ -593,6 +610,10 @@ public sealed class MediaScanner(PyreMediaSettings settings)
 
             // Real Kodi metadata is not junk, whatever its extension.
             if (ext == ".nfo" && MediaPlanner.IsMetadataNfo(f)) return false;
+
+            // Nor is a searchable text file this program wrote, nor a script.
+            if (ext == ".txt" && Books.ReadableText.IsSearchableText(f)) return false;
+            if (ext == ".nfo" && Books.ScriptNfo.IsScript(f)) return false;
         }
 
         return subs.All(sub => HoldsNothingWorthKeeping(sub, junkExts, depth + 1));
@@ -617,6 +638,8 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
     {
         // Fresh listings: the previous plan's may predate a rename.
         _dirCache.Clear();
+        _downloading.Clear();
+        _downloadingItem = JobStillRunning(item);
 
         var plan = new RenamePlan
         {
@@ -635,11 +658,56 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
         // Samples must be identified BEFORE episode matching. A file like
         // "sample.mkv" has no SxxExx of its own, so it would otherwise inherit
         // the episode number from the folder name and collide with the real file.
+        //
+        // The word is a hint and not proof, which is what IsSample says at
+        // length and what this used to ignore: an episode called "Free Sample",
+        // or a release named "...-sample-fix.mkv", was dropped from the plan
+        // outright - no row, no problem, not counted, absent from the preview
+        // with nothing anywhere saying why. So size has the final say here too.
+        // A real sample clip is a fraction of the episodes it ships beside.
+        var biggest = item.Files.Max(SizeOrZero);
+
+        // A folder named Sample is unambiguous - a release puts one there to
+        // hold exactly one kind of thing - so that alone is enough. The size
+        // guard stays for the filename, where it is earning its keep: a film
+        // actually called "Free Sample" sitting on its own is the biggest file
+        // there, so it fails the test and gets matched as the feature it is.
         var samples = item.Files
-            .Where(f => Path.GetFileName(f).Contains("sample", StringComparison.OrdinalIgnoreCase))
+            .Where(f => InSampleFolder(f, item.Path)
+                        || (SaysSample(Path.GetFileName(f))
+                            && (biggest <= 0 || SizeOrZero(f) * 4 < biggest)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var episodeFiles = item.Files.Where(f => !samples.Contains(f)).ToList();
+
+        // Set aside rather than vanished. Whatever is left out of the matching
+        // still gets a row, so the counts add up to what is in the folder.
+        foreach (var sample in samples.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            // Offered for removal, not merely noted. "Needs attention" with an
+            // empty target was the worst of both: a line in the preview, a tick
+            // box that did nothing, and the clip still on disk afterwards - and
+            // this row was itself the reason it was never offered properly,
+            // because AddCleanup skips any file the plan already has a row for.
+            //
+            // Unticked, like every deletion here, and only where the option is
+            // on. With it off the row stays as it was: said, counted, and
+            // nothing done about it.
+            plan.Actions.Add(settings.DeleteSamples
+                ? new PlannedAction
+                {
+                    SourcePath = sample,
+                    Status = PlanStatus.Delete,
+                    DeleteReason = "sample clip",
+                    StartsSelected = StartsTicked(sample, item.Path)
+                }
+                : new PlannedAction
+                {
+                    SourcePath = sample,
+                    Status = PlanStatus.Problem,
+                    Problem = "Looks like a sample clip beside the episodes, so it was left alone"
+                });
+        }
 
         // The folder name only stands in for a missing episode number when
         // there's exactly one candidate file - otherwise it's ambiguous.
@@ -768,7 +836,14 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
                 }
             }
 
-            var newName = BuildName(show, episode, extra, parsed.Value) + Path.GetExtension(file);
+            // Honoured, rather than loaded, saved and ignored. Unticking
+            // "rename episode files" left every filename being rewritten
+            // anyway, which is the one thing it exists to prevent - somebody
+            // who wants season folders but their own naming had no way to say
+            // so. Off, the file keeps its name and only the folder moves.
+            var newName = settings.RenameTvFiles
+                ? BuildName(show, episode, extra, parsed.Value) + Path.GetExtension(file)
+                : Path.GetFileName(file);
 
             var target = BuildTarget(item, file, season.Value, newName, plan, show);
             var action = MakeAction(file, target, claimed, parsed, episode, extra);
@@ -814,6 +889,8 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
     public RenamePlan PlanMovie(MediaItem item, Movie movie)
     {
         _dirCache.Clear();
+        _downloading.Clear();
+        _downloadingItem = JobStillRunning(item);
 
         var placeholder = new TvShow { Id = movie.TmdbId, Name = movie.Title };
         var plan = new RenamePlan { ShowFolder = item.Path, Show = placeholder };
@@ -833,10 +910,17 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
               ?? item.Detected3D
             : null;
 
+        // A disc image says so instead of claiming a layout it does not have.
+        if (settings.IsDiscImage(item.MainFile)) tag3D = Stereo3DTag.ForDiscImage(tag3D);
+
         var baseName = NameFormatter.BuildShowFolderName(
             settings.MovieFileFormat, movie.Title, year, settings.FilenameReplaceChar);
 
-        var newName = Stereo3DTag.Apply(baseName, tag3D) + Path.GetExtension(item.MainFile);
+        // As with episodes: off means the film keeps the name it has, and only
+        // the folder around it changes.
+        var newName = settings.RenameMovieFiles
+            ? Stereo3DTag.Apply(baseName, tag3D) + Path.GetExtension(item.MainFile)
+            : Path.GetFileName(item.MainFile);
 
         var targetDir = Path.GetDirectoryName(item.MainFile) ?? item.Path;
 
@@ -943,7 +1027,7 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
 
             string? reason = null;
 
-            if (settings.DeleteSamples && IsSample(name, file, ext, videoExts, mainSize))
+            if (settings.DeleteSamples && IsSample(name, file, ext, videoExts, mainSize, item.Path))
                 reason = "sample";
 
             else if (settings.DeleteJunkFiles && junkExts.Contains(ext))
@@ -952,6 +1036,17 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
                 // Offering to delete the user's own library metadata as "junk"
                 // is not a mistake worth risking, so check the content.
                 if (ext == ".nfo" && IsMetadataNfo(file)) continue;
+
+                // Same trap, one file type along: the searchable text written
+                // beside a comic or a book is a .txt, and .txt is on the junk
+                // list. Reading a shelf takes minutes; offering to delete the
+                // result afterwards would be worse than never writing it.
+                if (ext == ".txt" && Books.ReadableText.IsSearchableText(file)) continue;
+
+                // And the script written beside a comic, which is an .nfo but
+                // not Kodi's - told apart by its root element, since a scene
+                // release advert has the same three letters.
+                if (ext == ".nfo" && Books.ScriptNfo.IsScript(file)) continue;
 
                 reason = $"leftover {ext}";
             }
@@ -962,25 +1057,47 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
             {
                 SourcePath = file,
                 Status = PlanStatus.Delete,
-                DeleteReason = reason
+                DeleteReason = reason,
+                StartsSelected = StartsTicked(file, item.Path)
             });
         }
+    }
+
+    /// <summary>How big a file is, or nothing if it cannot be asked.</summary>
+    private static long SizeOrZero(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch (Exception) { return 0; }
     }
 
     /// <summary>
     /// Whether a file is a sample clip - the thirty-second teaser scene releases
     /// ship beside the feature.
     /// <para>
-    /// The name is a strong hint and nothing more. "Free Sample" and "Sample This"
-    /// are real films, and a 900 MB file is not a sample clip whatever it is
-    /// called; treating the word as proof offered a feature for deletion. Size has
-    /// the final say, and only a video can be a sample at all - a stray sample.jpg
-    /// is artwork or noise, which is not what this option is for.
+    /// Where the release says so, in the filename or in a folder above it, that
+    /// is taken at its word. A "Sample" folder is put there to hold exactly one
+    /// kind of thing. Second-guessing it with size and duration meant a 77 MB
+    /// thirty-second clip in a folder named Sample sat through a rename while
+    /// the checks below were still making up their mind.
+    /// </para>
+    /// <para>
+    /// Nothing is deleted on the strength of this. It decides what appears in
+    /// the preview as an unticked row, and any file the plan is already renaming
+    /// is skipped before this is reached - so a film genuinely called "Free
+    /// Sample" is never offered as its own leftover.
+    /// </para>
+    /// <para>
+    /// Where nothing says so, it has to be obvious: small in absolute terms,
+    /// small against the feature, and short. Only a video can be a sample at
+    /// all - a stray sample.jpg is artwork or noise.
     /// </para>
     /// </summary>
-    private bool IsSample(string name, string path, string ext, string[] videoExts, long mainSize)
+    private bool IsSample(string name, string path, string ext, string[] videoExts,
+                          long mainSize, string root)
     {
         if (!videoExts.Contains(ext)) return false;
+
+        if (SaysSample(name) || InSampleFolder(path, root)) return true;
 
         long size;
         try { size = new FileInfo(path).Length; }
@@ -989,26 +1106,176 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
         var tiny = size < 300L * 1024 * 1024;
         var slither = mainSize > 0 && size < mainSize / 10;
 
-        var suspect = name.Contains("sample", StringComparison.OrdinalIgnoreCase)
-            ? tiny || slither          // named, and small enough to be one
-            : tiny && slither;         // unnamed, so it has to be obvious
+        if (!(tiny && slither)) return false;
 
-        if (!suspect) return false;
-
-        // Size is only a proxy. What actually makes something a sample clip is
-        // that it is a couple of minutes long, and bitrate breaks the proxy in
-        // both directions: two minutes of 4K is a few hundred megabytes, and a
-        // whole film at a low bitrate can be smaller than that. Ask ffprobe how
-        // long it really is - only for the few files that got this far, so the
-        // cost is bounded.
+        // Size gets a file this far and no further. It decides who is worth
+        // probing, not who goes.
+        //
+        // On its own it condemns the wrong files. Bitrate breaks it in both
+        // directions - two minutes of 4K is a few hundred megabytes - and an
+        // episode that was hard to find is genuinely a fraction of the ones
+        // beside it, because a poor copy was the only copy going. Being small
+        // is not evidence of being a clip; being short is.
         var seconds = _probe.Value.QuickDuration(path);
-        if (seconds is null) return true;              // no ffprobe: size had to do
+
+        // No answer is not a yes. This returned true and let size decide alone,
+        // which is exactly the case above: one bad-quality episode, no ffprobe,
+        // and an offer to delete it. Nothing here is worth guessing at.
+        if (seconds is null) return false;
 
         // Five minutes. A sample clip runs thirty seconds to two; the line has to
         // sit above that and below real content, and real content goes shorter
         // than you would think - plenty of animated shows run eleven minutes, and
         // a genuine short can be three. Erring high would condemn those.
         return seconds < 5 * 60;
+    }
+
+    /// <summary>
+    /// Whether a filename labels itself a throwaway clip.
+    ///
+    /// The word on its own is not enough, because it is also a title. "Free
+    /// Sample" is a real film, and an episode can be called one. What separates
+    /// them is whether the file names itself as a piece of content: something
+    /// carrying an episode number, or a year the way a film does, is telling you
+    /// what it is - and there the word belongs to the title.
+    ///
+    /// Those are not waved through, only sent the long way round: they still
+    /// face the size and duration checks, which is what catches a genuine
+    /// "Show.S01E01.1080p-sample.mkv" while leaving "Show 01x01 Free Sample"
+    /// alone. A full-length episode is neither a tenth the size of its
+    /// neighbours nor under five minutes.
+    /// </summary>
+    public static bool SaysSample(string name) =>
+        name.Contains("sample", StringComparison.OrdinalIgnoreCase)
+        && !NamesItself(name);
+
+    /// <summary>Whether the name identifies a piece of content in its own right.</summary>
+    private static bool NamesItself(string name) =>
+        Naming.EpisodeMatcher.Parse(name) is not null
+        || System.Text.RegularExpressions.Regex.IsMatch(name, @"(?:19|20)\d{2}");
+
+    /// <summary>
+    /// Whether any folder between the file and the item it belongs to calls
+    /// itself a sample. Bounded by the item so it can never walk out into the
+    /// library and find somebody's "Samples" music folder.
+    /// </summary>
+    public static bool InSampleFolder(string path, string root) =>
+        InFolderNamed(path, root, "sample", "samples");
+
+    /// <summary>
+    /// Folders whose name says somebody chose to keep what is inside.
+    ///
+    /// Nothing here is spared deletion - a scene advert in an Extras folder is
+    /// still a scene advert. What the name buys is the benefit of the doubt for
+    /// anything sizeable: a deleted scene and a sample clip are both short
+    /// videos nobody named carefully, and only the folder tells them apart.
+    /// </summary>
+    private static readonly string[] BonusFolders =
+    [
+        "extras", "extra", "featurettes", "featurette", "bonus", "bonus features",
+        "deleted", "deleted scenes", "behind the scenes", "interviews", "specials",
+        "making of", "documentary"
+    ];
+
+    /// <summary>Whether any folder between the file and the item is one of these.</summary>
+    private static bool InFolderNamed(string path, string root, params string[] names)
+    {
+        var dir = Path.GetDirectoryName(path);
+
+        // Strictly between the file and the item. The item's own folder is not
+        // consulted, or a show called "Sample" would have had every one of its
+        // episodes offered for deletion.
+        while (!string.IsNullOrEmpty(dir)
+               && dir.Length > root.Length
+               && dir.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+        {
+            var folder = Path.GetFileName(dir);
+
+            foreach (var name in names)
+                if (folder.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+            dir = Path.GetDirectoryName(dir);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a deletion should arrive ticked.
+    ///
+    /// Ticked is the default now, because the point of the list is not to
+    /// forget: leftovers were arriving unticked, Apply walked past them without
+    /// a word, and the folder came out of a rename still holding them. Every
+    /// row is still visible, still says what it will do, still goes to the
+    /// Recycle Bin, and can still be cleared before Apply.
+    ///
+    /// The exception is anything sizeable sitting in a folder that says a
+    /// person put it there - Extras, Deleted Scenes, Featurettes. A deleted
+    /// scene and a sample clip look alike from the outside, and one of them is
+    /// content somebody chose to keep. Those are offered, and left for you.
+    /// </summary>
+    private bool StartsTicked(string path, string root)
+    {
+        if (!InFolderNamed(path, root, BonusFolders)
+            && !InFolderNamed(path, root, settings.ExtrasFolderName))
+            return true;
+
+        // In a bonus folder, only the obviously-disposable is ticked. Ten
+        // megabytes is far above any .nfo or .txt and far below anything worth
+        // a second look.
+        return SizeOrZero(path) <= 10L * 1024 * 1024;
+    }
+
+    /// <summary>
+    /// Folders a download client is writing into, worked out once each.
+    ///
+    /// Cleared at the start of every plan rather than cached for the planner's
+    /// lifetime: a transfer finishing is exactly the thing this has to notice,
+    /// and the planner outlives many plans.
+    /// </summary>
+    private readonly Dictionary<string, string?> _downloading = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Set once per plan: the client still writing anywhere under this item.</summary>
+    private string? _downloadingItem;
+
+    /// <summary>
+    /// Whether anything under this item is still arriving.
+    ///
+    /// Never walks a scan root. A loose file's Path is the root it was found
+    /// in, and so is a combined entry's - the folder its parts share. Walking
+    /// either reads the whole library to answer a question about one show, and
+    /// finds every unrelated download in it: one torrent still running made
+    /// every item in the library report itself as busy, and Ghost in the Shell
+    /// was refused because Stranger Things had not finished.
+    ///
+    /// A combined entry is asked about the folders it was actually built from.
+    /// A loose file has none, and is covered by the per-file and per-folder
+    /// checks instead.
+    /// </summary>
+    private string? JobStillRunning(MediaItem item)
+    {
+        if (item.IsLooseFile || IsScanRoot(item.Path))
+        {
+            foreach (var folder in item.CombinedFrom)
+                if (Downloads.ActiveUnder(folder) is { } busy)
+                    return busy;
+
+            return null;
+        }
+
+        return Downloads.ActiveUnder(item.Path);
+    }
+
+    private string? DownloadingInto(string file)
+    {
+        var dir = Path.GetDirectoryName(file);
+        if (string.IsNullOrEmpty(dir)) return null;
+
+        if (!_downloading.TryGetValue(dir, out var client))
+            _downloading[dir] = client = Downloads.ActiveIn(dir);
+
+        return client;
     }
 
     private readonly Lazy<Media.MediaProbe> _probe =
@@ -1145,6 +1412,31 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
             return action;
         }
 
+        // Or anywhere under the same download.
+        if (_downloadingItem is { } job)
+        {
+            action.Status = PlanStatus.Problem;
+            action.Problem = $"{job} is still downloading this - "
+                             + "left alone until the whole thing finishes";
+            return action;
+        }
+
+        // Or sitting beside something that is.
+        //
+        // A finished episode carries no marker of its own, so the check above
+        // clears it - but moving it out of a folder the client is still writing
+        // into breaks the transfer just the same, and renaming it loses the
+        // client's record of it. The remux side has refused these since three
+        // complete Stranger Things episodes were offered while five beside them
+        // were still arriving; this side only ever looked at the one file.
+        if (DownloadingInto(source) is { } into)
+        {
+            action.Status = PlanStatus.Problem;
+            action.Problem = $"{into} is still downloading into this folder - "
+                             + "left alone until it finishes";
+            return action;
+        }
+
         // Ordinal, so a name that differs only in capitalisation still counts as
         // a change: "the office" becomes "The Office" when the provider says so.
         // The executor stages case-only renames through a temporary name, since
@@ -1212,7 +1504,65 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
         if (!string.Equals(current, wanted, StringComparison.OrdinalIgnoreCase) && Directory.Exists(target))
             rename.Problem = $"A folder named '{wanted}' already exists here";
 
+        // A folder is claimed as a film or a series on the strength of the video
+        // in it, and nothing asks what else lives there. A real shelf had
+        // "Michael Crichton Collection" - seventy-five books and one stray video
+        // file - offered up to be renamed after whatever film that one file
+        // turned out to be. The books would have survived; the collection would
+        // not have been called anything meaningful again.
+        //
+        // Said rather than silently skipped, because the user may genuinely want
+        // it and is the one who can tell.
+        else if (OtherMediaIn(item.Path, item.Files.Count) is { } crowd)
+            rename.Problem = crowd;
+
         return rename;
+    }
+
+    /// <summary>
+    /// Why this folder does not look like it belongs to the video in it, or null
+    /// when it does.
+    ///
+    /// Counted with a ceiling rather than exhaustively: the question is whether
+    /// books and comics outnumber the video, and walking a collection of eleven
+    /// hundred files to learn that twice over is waste.
+    /// </summary>
+    private static string? OtherMediaIn(string folder, int videoCount)
+    {
+        const int Enough = 200;
+
+        var books = 0;
+        var comics = 0;
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories))
+            {
+                if (Books.BookFile.IsBook(file)) books++;
+                else if (Books.ComicMatcher.IsComic(file)) comics++;
+
+                if (books + comics >= Enough) break;
+            }
+        }
+        catch (Exception)
+        {
+            return null;   // unreadable is not evidence of anything
+        }
+
+        var others = books + comics;
+
+        // Comfortably outnumbering the video, and enough of them to be somebody's
+        // collection rather than a couple of stray files beside a film.
+        if (others < 5 || others < videoCount * 3) return null;
+
+        var what = books > 0 && comics > 0 ? $"{books} book(s) and {comics} comic(s)"
+                 : books > 0 ? $"{books} book(s)"
+                 : $"{comics} comic(s)";
+
+        return $"This folder holds {what} and only "
+             + (videoCount == 1 ? "one video file" : $"{videoCount} video files")
+             + " - renaming it after the video would rename somebody's collection. "
+             + "Rename it by hand if that is really what you want.";
     }
 
     /// <summary>True when the path is one of the user's configured scan roots.</summary>
@@ -1271,7 +1621,11 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
     private void SweepReleaseFolders(RenamePlan plan, MediaItem item)
     {
         var junkExts = settings.JunkExtensionList;
-        var videoExts = settings.VideoExtensions;
+
+        // Disc images count as content here whatever the junk list says - .bin
+        // is a plausible thing for somebody to add to it, and the file beside
+        // the .cue is a film.
+        var videoExts = settings.ScannedExtensions;
         var subExts = settings.SubtitleExtensions;
 
         foreach (var folder in item.CombinedFrom)
@@ -1450,6 +1804,64 @@ public static class Downloads
             try { if (File.Exists(video + suffix)) return client; }
             catch (Exception) { /* unreadable is not evidence either way */ }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The client downloading something into this folder, or null when nothing is.
+    ///
+    /// A finished file carries no marker of its own, so <see cref="InProgress"/>
+    /// has nothing to say about it - but a finished file sitting among half a
+    /// download is still part of a live transfer, and the client expects to find
+    /// it where it left it.
+    ///
+    /// Folder-level on purpose. What makes the neighbours unsafe is the
+    /// transfer, and the transfer belongs to the folder, not to the one file.
+    /// Found on a real library: three complete Stranger Things episodes beside
+    /// five .!ut placeholders, none of the three carrying a marker.
+    /// </summary>
+    /// <summary>
+    /// The client downloading anywhere beneath this folder, or null.
+    ///
+    /// A torrent is one job even though its seasons finish at different times.
+    /// Checking only the folder a file sits in cleared a completed season one
+    /// while four and five were still arriving - and moving season one out from
+    /// under the client breaks the transfer for the whole torrent, not only for
+    /// what moved.
+    /// </summary>
+    public static string? ActiveUnder(string root)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            {
+                var name = Path.GetFileName(file);
+
+                foreach (var (suffix, client) in Markers)
+                    if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                        return client;
+            }
+        }
+        catch (Exception) { /* unreadable is not evidence either way */ }
+
+        return null;
+    }
+
+    public static string? ActiveIn(string folder)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(folder))
+            {
+                var name = Path.GetFileName(file);
+
+                foreach (var (suffix, client) in Markers)
+                    if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                        return client;
+            }
+        }
+        catch (Exception) { /* unreadable is not evidence either way */ }
 
         return null;
     }

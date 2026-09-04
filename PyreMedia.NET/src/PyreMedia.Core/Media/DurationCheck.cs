@@ -1,4 +1,4 @@
-namespace PyreMedia.Core.Media;
+﻿namespace PyreMedia.Core.Media;
 
 /// <summary>
 /// Whether a remuxed file was truncated.
@@ -20,6 +20,14 @@ namespace PyreMedia.Core.Media;
 /// tight. Where it does not - MKV frequently reports only the container figure
 /// - there is nothing better than the container, and the tolerance widens to
 /// cover the streams that might have been defining it.
+///
+/// Every kept track is then asked whether it still runs as long as it did,
+/// which is the question worth asking and catches a single truncated stream in
+/// a file that is otherwise the right length. It is only asked of tracks whose
+/// stated length before the remux was measured rather than inherited from the
+/// container - see <see cref="Inherited"/>, which is where a good remux was
+/// lost. Only picture and sound are allowed to define the expected length,
+/// since a subtitle ends when the talking does.
 /// </summary>
 public static class DurationCheck
 {
@@ -88,8 +96,8 @@ public static class DurationCheck
     /// </summary>
     private static string? PerStream(MediaInfo source, MediaInfo output, IReadOnlyList<MediaStream> kept)
     {
-        var mine = kept.Where(Timed).ToList();
-        var theirs = output.Streams.Where(Timed).ToList();
+        var mine = kept.Where(Comparable).ToList();
+        var theirs = output.Streams.Where(Comparable).ToList();
 
         if (mine.Count == 0 || mine.Count != theirs.Count) return null;
 
@@ -100,6 +108,10 @@ public static class DurationCheck
 
             if (before.Kind != after.Kind) return null;      // not the pairing we assumed
             if (before.Seconds <= 0 || after.Seconds <= 0) continue;
+
+            // Only where the number is a description of that track rather than
+            // the container's figure wearing its name. See Believable.
+            if (!Believable(before)) continue;
 
             // Three seconds covers container rounding and the last frame of a
             // GOP. Truncation is measured in minutes.
@@ -146,12 +158,90 @@ public static class DurationCheck
     /// tracks being dropped, and the output's honest 105:25 read as a minute
     /// missing.
     ///
+    /// Subtitles are excluded for a different reason, and it cost a real file.
+    /// A subtitle track's duration is not a length of content: before a remux
+    /// it is usually the container's figure copied onto every track, and after
+    /// one it is the timestamp of the last cue - which is legitimately minutes
+    /// before the end, because nobody speaks over the credits. The Croods is
+    /// the case that proved it. Its source reports no duration at all for the
+    /// video or either audio track, and all seventeen PGS tracks report exactly
+    /// 5,916.9 seconds, to the decimal, which is the container's own figure -
+    /// seventeen languages do not end on the same instant. The remux wrote the
+    /// honest 88:50 for the English track, the check read a ten-minute
+    /// shortfall, and a good 20 GB remux was refused. Worse, since the picture
+    /// and sound said nothing measurable, subtitles were the only thing being
+    /// compared: the verdict rested entirely on the one stream that cannot give
+    /// it.
+    ///
     /// Data and attachment streams are excluded for the same reason. Only
-    /// something that actually plays over time can say how long a file is.
+    /// something that plays over time, and whose end is the end of the film,
+    /// can say how long a file is.
     /// </summary>
     private static bool Timed(MediaStream stream) =>
         !stream.IsCoverArt
-        && stream.Kind is StreamKind.Video or StreamKind.Audio or StreamKind.Subtitle;
+        && stream.Kind is StreamKind.Video or StreamKind.Audio;
+
+    /// <summary>
+    /// Whether a stream can be compared against its own self after a remux.
+    ///
+    /// Wider than <see cref="Timed"/> on purpose. Asking whether each track
+    /// still runs as long as it did is the right question and a subtitle is
+    /// entitled to be asked it - what a subtitle cannot do is define how long
+    /// the film is, which is what Timed is for.
+    /// </summary>
+    /// <summary>
+    /// Whether a track's length can be compared across a remux at all.
+    ///
+    /// Picture and sound only. A subtitle's DURATION is not a measurement of
+    /// its content - it is a statistic whoever muxed the file wrote down, and
+    /// muxers disagree about it even when not a byte has changed.
+    ///
+    /// Measured on Babe (1995), which refused to remux for a year of film time
+    /// that was never missing. Its English PGS track carries a real per-track
+    /// tag of 01:29:24.818, so the tag test below trusted it; mkvmerge wrote
+    /// 01:27:13.186 for the same track. The content was identical - 2,491
+    /// packets in, 2,491 packets out, last event at 5364.818 in both - because
+    /// mkvmerge discounts the trailing PGS clear-screen sets, which carry no
+    /// duration of their own. Two honest tools, one bit-identical track, two
+    /// minutes of disagreement.
+    ///
+    /// Picture and sound have no such ambiguity: the same file came through
+    /// with 01:31:55.677 and 01:31:55.723 on both sides, to the millisecond.
+    /// Losing a subtitle track outright is still caught, by the stream and
+    /// codec checks that run beside this one.
+    /// </summary>
+    private static bool Comparable(MediaStream stream) =>
+        !stream.IsCoverArt
+        && stream.Kind is StreamKind.Video or StreamKind.Audio;
+
+    /// <summary>
+    /// Whether a stream's stated length can be compared with a straight face.
+    ///
+    /// The question is where the number came from, not what it equals. ffprobe
+    /// fills a stream's duration in from the container when the track carries
+    /// no figure of its own, and on Matroska it does that for subtitles - so a
+    /// PGS track claims the whole film while the picture beside it claims
+    /// nothing. Comparing that against a remux, which writes real tags, reads
+    /// as a truncation. The Croods lost a good 20 GB file to it: seventeen PGS
+    /// tracks all reporting the container's 5916.9 seconds against an honest
+    /// 88:50, and no other track reporting anything at all.
+    ///
+    /// The first attempt at this test asked whether the value equalled the
+    /// container, which was wrong in the worst possible direction: an honest
+    /// picture and an honest main soundtrack are exactly as long as the film,
+    /// so it excused the two tracks whose truncation matters most and left the
+    /// check able to fire only on subtitles - the opposite of the intent, and
+    /// on any file carrying real tags a live regression.
+    ///
+    /// So it asks the probe instead. A figure that came from the file's own
+    /// per-track tag is a measurement of that track and is compared, whatever
+    /// it equals. A figure ffprobe supplied is only believed for picture and
+    /// sound, where the container's length is a fair description of the track;
+    /// for a subtitle it says nothing, because a subtitle ends when the talking
+    /// does.
+    /// </summary>
+    private static bool Believable(MediaStream before) =>
+        before.Kind is StreamKind.Video or StreamKind.Audio || before.SecondsMeasured;
 
     private static string Minutes(double seconds) =>
         $"{(int)seconds / 60}:{(int)seconds % 60:00}";

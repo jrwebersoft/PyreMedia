@@ -41,6 +41,16 @@ public sealed class Season
     public required int Number { get; init; }
     public List<Episode> Episodes { get; init; } = [];
 
+    /// <summary>
+    /// This season's own poster, where the provider has one.
+    ///
+    /// A real thing rather than a nicety: most series change the artwork every
+    /// year, and Kodi shows a season's poster when you open the series. It
+    /// arrives in the same reply the episode list does, so having it costs
+    /// nothing beyond reading the field.
+    /// </summary>
+    public string? PosterUrl { get; init; }
+
     /// <summary>Season 0 is the specials season by long-standing convention.</summary>
     public bool IsSpecials => Number == 0;
 }
@@ -66,6 +76,20 @@ public sealed class Episode
     public int? RuntimeMinutes { get; init; }
 
     /// <summary>
+    /// A frame from this episode - what Kodi shows beside it in an episode list.
+    ///
+    /// Not the show's poster. The poster is one image for the whole series and
+    /// belongs in the show's folder; putting it beside every episode gives fifty
+    /// identical thumbnails and tells you nothing about which episode you are
+    /// looking at. TMDb calls this a still and TheTVDB calls it the episode
+    /// image; both mean a picture of the episode itself.
+    ///
+    /// Null where the provider has none, which is common for older shows and for
+    /// episodes that have not aired.
+    /// </summary>
+    public string? StillUrl { get; init; }
+
+    /// <summary>
     /// Which provider supplied this episode.
     ///
     /// Matters because a Kodi media source is scraped by one scraper at a time.
@@ -75,6 +99,28 @@ public sealed class Episode
     /// in a library whose source scrapes TMDb.
     /// </summary>
     public string? Source { get; init; }
+
+    /// <summary>
+    /// The same episode with a picture taken from elsewhere.
+    ///
+    /// A copy rather than a setter, so a merge cannot quietly alter the episode
+    /// another source is still holding. Written out by hand because this is a
+    /// class and not a record - and it stays a class, since episodes are held in
+    /// dictionaries and compared by identity in several places that value
+    /// equality would change underneath.
+    /// </summary>
+    public Episode WithStill(string? still) => new()
+    {
+        SeasonNumber = SeasonNumber,
+        Number = Number,
+        Name = Name,
+        FirstAired = FirstAired,
+        Overview = Overview,
+        ProductionCode = ProductionCode,
+        RuntimeMinutes = RuntimeMinutes,
+        StillUrl = still,
+        Source = Source
+    };
 }
 
 /// <summary>Season/episode numbers parsed out of a filename.</summary>

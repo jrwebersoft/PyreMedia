@@ -188,7 +188,18 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
             if (seasonDoc is null || !seasonDoc.RootElement.TryGetProperty("episodes", out var epsEl))
                 continue;
 
-            var season = new Season { Number = sn };
+            var season = new Season
+            {
+                Number = sn,
+
+                // Also already in this reply, like the stills. Most series
+                // change their artwork every year, and Kodi shows a season's
+                // own poster when the series is opened.
+                PosterUrl = seasonDoc.RootElement.TryGetProperty("poster_path", out var sp)
+                            && sp.GetString() is { Length: > 0 } sPath
+                    ? "https://image.tmdb.org/t/p/w500" + sPath
+                    : null
+            };
 
             foreach (var e in epsEl.EnumerateArray())
             {
@@ -205,6 +216,13 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
                     RuntimeMinutes = e.TryGetProperty("runtime", out var rt)
                                      && rt.ValueKind == JsonValueKind.Number
                         ? rt.GetInt32() : null,
+
+                    // Already in this response - the season endpoint returns a
+                    // still for every episode, so the picture of the episode
+                    // costs nothing beyond reading the field that was always
+                    // there.
+                    StillUrl = Still(e),
+
                     Source = "TMDb"
                 });
             }
@@ -280,6 +298,21 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
 
             return [.. list.OrderByDescending(i => i.Score).ThenByDescending(i => i.Width)];
         }
+    }
+
+    /// <summary>
+    /// An episode's own frame, at a size worth keeping.
+    ///
+    /// w780 rather than original: a still is a 16:9 frame shown small in a list,
+    /// and the original is often a 1920-wide file for something displayed at a
+    /// few hundred pixels. Fifty of those per season is a lot of disk for no
+    /// visible difference.
+    /// </summary>
+    private static string? Still(JsonElement episode)
+    {
+        var path = episode.TryGetProperty("still_path", out var s) ? s.GetString() : null;
+
+        return string.IsNullOrWhiteSpace(path) ? null : "https://image.tmdb.org/t/p/w780" + path;
     }
 
     private async Task<JsonDocument?> GetJsonAsync(string url, CancellationToken ct)

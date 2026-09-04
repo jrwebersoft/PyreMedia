@@ -7,7 +7,17 @@ public enum ArtKind
     Fanart,
 
     /// <summary>Transparent logo of the title. Always a PNG - the point is the transparency.</summary>
-    ClearLogo
+    ClearLogo,
+
+    /// <summary>
+    /// A frame from one episode, written as "&lt;video&gt;-thumb.jpg".
+    ///
+    /// The only per-episode image there is. A poster describes a series and is
+    /// the same for all of it; a thumb describes the episode it sits beside. Put
+    /// a poster in this slot and every episode in a season looks identical in
+    /// the one place a picture was supposed to tell them apart.
+    /// </summary>
+    EpisodeThumb
 }
 
 /// <summary>One image a provider offers, before anything is downloaded.</summary>

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using PyreMedia.Core;
 using PyreMedia.Core.Models;
@@ -49,6 +49,7 @@ public partial class SettingsWindow
         TxtFfprobe.Text = _settings.FfprobePath;
         TxtMkvMerge.Text = _settings.MkvMergePath;
         TxtDoviTool.Text = _settings.DoviToolPath;
+        TxtPlayer.Text = _settings.PlayerPath;
         ChkPreferMkv.IsChecked = _settings.PreferMkvMerge;
 
         // Say plainly whether each tool is actually reachable, so a missing one
@@ -57,12 +58,20 @@ public partial class SettingsWindow
         ShowToolStatus(TxtMkvStatus, LinkMkv, _settings.MkvMergePath, "mkvmerge");
         ShowToolStatus(TxtDoviStatus, LinkDovi, _settings.DoviToolPath, "dovi_tool");
 
+        // No link to hide here - the Get VLC link is worth showing either way,
+        // since somebody may want a better player than whatever Windows picked.
+        ShowToolStatus(TxtPlayerStatus, null, _settings.PlayerPath, "That player",
+                       "Play will use whatever Windows opens the file with, and full screen will not work");
+
         ChkWriteNfo.IsChecked = _settings.WriteNfoFiles;
         ChkPreserveNfo.IsChecked = _settings.PreserveExistingNfo;
         ChkMergeNfo.IsChecked = _settings.MergeExistingNfo;
         ChkDownloadArt.IsChecked = _settings.DownloadArtwork;
         ChkPreserveArt.IsChecked = _settings.PreserveExistingArtwork;
         ChkUpdateNfoRemux.IsChecked = _settings.UpdateNfoAfterRemux;
+        ChkDiscImages.IsChecked = _settings.OrganiseDiscImages;
+        TxtDiscExt.Text = _settings.DiscImageTypes;
+        ChkAutoAdvance.IsChecked = _settings.AutoAdvanceAfterApply;
         ChkDeleteSamples.IsChecked = _settings.DeleteSamples;
         ChkDeleteJunk.IsChecked = _settings.DeleteJunkFiles;
         ChkRecycleBin.IsChecked = _settings.DeleteToRecycleBin;
@@ -109,6 +118,28 @@ public partial class SettingsWindow
         TxtTmdbKey.Text = _settings.TmdbApiKey;
         TxtTvdbKey.Text = _settings.TvdbApiKey;
         TxtAcoustIdKey.Text = _settings.AcoustIdApiKey;
+
+        TxtReplaceChar.Text = _settings.FilenameReplaceChar.ToString();
+
+        TxtComicFolder.Text = _settings.ComicFolders.FirstOrDefault() ?? "";
+        TxtBookFolder.Text = _settings.BookFolders.FirstOrDefault() ?? "";
+        TxtComicLibrary.Text = _settings.ComicDestination;
+        TxtBookLibrary.Text = _settings.EbookDestination;
+
+        TxtComicPattern.Text = string.IsNullOrWhiteSpace(_settings.ComicFileFormat)
+            ? PyreMedia.Core.Books.BookNaming.ComicDefault : _settings.ComicFileFormat;
+
+        TxtBookPattern.Text = string.IsNullOrWhiteSpace(_settings.BookFileFormat)
+            ? PyreMedia.Core.Books.BookNaming.BookDefault : _settings.BookFileFormat;
+
+        ChkReadInside.IsChecked = _settings.ReadBookMetadata;
+
+        OnBookPatternChanged(this, null!);
+
+        TxtGcdPath.Text = _settings.GcdDatabasePath;
+        TxtMetronUser.Text = _settings.MetronUser;
+        TxtMetronPassword.Password = _settings.MetronPassword;
+        TxtComicVineKey.Text = _settings.ComicVineApiKey;
 
         TxtMovieDest.Text = _settings.MovieDestination;
         TxtTvDest.Text = _settings.TvDestination;
@@ -175,6 +206,140 @@ public partial class SettingsWindow
         };
 
         if (dialog.ShowDialog() == true) box.Text = dialog.FolderName;
+    }
+
+    /// <summary>
+    /// Open on a named tab.
+    ///
+    /// So the Books tab's own Settings button lands on the book settings rather
+    /// than on Folders, leaving somebody to find the comic sources by hunting.
+    /// </summary>
+    public void ShowTab(string header)
+    {
+        foreach (var tab in Tabs.Items.OfType<TabItem>())
+            if (string.Equals(tab.Header as string, header, StringComparison.OrdinalIgnoreCase))
+            {
+                Tabs.SelectedItem = tab;
+                return;
+            }
+    }
+
+    /// <summary>A comic or ebook folder, chosen or typed.</summary>
+    private void OnPickBookFolder(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string which }) return;
+
+        var box = which switch
+        {
+            "comicsource" => TxtComicFolder,
+            "comiclibrary" => TxtComicLibrary,
+            "booksource" => TxtBookFolder,
+            _ => TxtBookLibrary
+        };
+
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = which switch
+            {
+                "comicsource" => "Where your comics are now",
+                "comiclibrary" => "Where comics should end up",
+                "booksource" => "Where your ebooks are now",
+                _ => "Where ebooks should end up"
+            },
+            InitialDirectory = System.IO.Directory.Exists(box.Text) ? box.Text : ""
+        };
+
+        if (dialog.ShowDialog(this) == true) box.Text = dialog.FolderName;
+    }
+
+    /// <summary>What the pattern actually produces, shown as it is typed.</summary>
+    private void OnBookPatternChanged(object sender, TextChangedEventArgs e)
+    {
+        if (TxtComicExample is null) return;      // still being built
+
+        ShowPattern(TxtComicPattern.Text, comic: true, TxtComicExample, TxtComicProblem);
+        ShowPattern(TxtBookPattern.Text, comic: false, TxtBookExample, TxtBookProblem);
+    }
+
+    private static void ShowPattern(string pattern, bool comic, TextBlock example, TextBlock problem)
+    {
+        var trouble = PyreMedia.Core.Books.BookNaming.Problems(pattern, comic);
+
+        problem.Text = trouble ?? "";
+
+        if (trouble is not null) { example.Text = ""; return; }
+
+        var shown = PyreMedia.Core.Books.BookNaming.Example(pattern, comic);
+
+        // Where the pattern files by publisher, show both cases. Most comics
+        // do not carry one, and a preview that always supplied "Image Comics"
+        // made a pattern look tidy that would put a large part of a real
+        // library under Unknown publisher instead.
+        if (comic && pattern.Contains("{publisher}", StringComparison.OrdinalIgnoreCase))
+        {
+            var without = PyreMedia.Core.Books.BookNaming.Example(pattern, comic, known: false);
+
+            if (!string.Equals(without, shown, StringComparison.Ordinal))
+                shown += "\nand where the publisher is not known:  " + without;
+        }
+
+        example.Text = shown;
+    }
+
+    private void OnPickPlayer(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "The program Play should use",
+            Filter = "Programs (*.exe)|*.exe|Any file (*.*)|*.*",
+
+            // Where VLC actually installs, which is not on the PATH.
+            InitialDirectory = System.IO.Directory.Exists(@"C:\Program Files\VideoLAN\VLC")
+                ? @"C:\Program Files\VideoLAN\VLC"
+                : ""
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        TxtPlayer.Text = dialog.FileName;
+
+        ShowToolStatus(TxtPlayerStatus, null, dialog.FileName, "That player",
+                       "Play will use whatever Windows opens the file with, and full screen will not work");
+    }
+
+    /// <summary>
+    /// Find the GCD dump. Its own name changes with each release, so no
+    /// filename is assumed - only the extension, and even that is loosened
+    /// because the download has arrived as .db and as .sqlite at different times.
+    /// </summary>
+    private void OnPickGcd(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "The Grand Comics Database dump",
+            Filter = "SQLite database (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|Any file (*.*)|*.*",
+            InitialDirectory = System.IO.File.Exists(TxtGcdPath.Text)
+                ? System.IO.Path.GetDirectoryName(TxtGcdPath.Text) ?? ""
+                : ""
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        TxtGcdPath.Text = dialog.FileName;
+
+        // Checked here rather than at the first search. The check has existed
+        // since the provider was written, saying in its own summary that it is
+        // there so a wrong choice is caught when it is made - and nothing has
+        // ever called it, so a wrong file sat in Settings looking accepted and
+        // failed silently later.
+        if (PyreMedia.Core.Books.GcdProvider.Check(dialog.FileName) is { } trouble)
+        {
+            MessageBox.Show(this,
+                trouble + "\n\nThe path has been kept so you can look at it, but comics will "
+                + "not be matched from it until it points at the dump itself - the file inside "
+                + "the download, not the archive it arrived in.",
+                "That file", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>Show the user what their format actually produces.</summary>
@@ -253,6 +418,10 @@ public partial class SettingsWindow
         _settings.PreferMkvMerge = ChkPreferMkv.IsChecked == true;
         if (!string.IsNullOrWhiteSpace(TxtMkvMerge.Text)) _settings.MkvMergePath = TxtMkvMerge.Text.Trim();
         if (!string.IsNullOrWhiteSpace(TxtDoviTool.Text)) _settings.DoviToolPath = TxtDoviTool.Text.Trim();
+
+        // Emptied on purpose means "go back to whatever is on the PATH", which
+        // is the default and a reasonable thing to want back.
+        _settings.PlayerPath = string.IsNullOrWhiteSpace(TxtPlayer.Text) ? "vlc" : TxtPlayer.Text.Trim();
         if (!string.IsNullOrWhiteSpace(TxtFfmpeg.Text)) _settings.FfmpegPath = TxtFfmpeg.Text.Trim();
         if (!string.IsNullOrWhiteSpace(TxtFfprobe.Text)) _settings.FfprobePath = TxtFfprobe.Text.Trim();
 
@@ -262,6 +431,9 @@ public partial class SettingsWindow
         _settings.DownloadArtwork = ChkDownloadArt.IsChecked == true;
         _settings.PreserveExistingArtwork = ChkPreserveArt.IsChecked == true;
         _settings.UpdateNfoAfterRemux = ChkUpdateNfoRemux.IsChecked == true;
+        _settings.OrganiseDiscImages = ChkDiscImages.IsChecked == true;
+        if (!string.IsNullOrWhiteSpace(TxtDiscExt.Text)) _settings.DiscImageTypes = TxtDiscExt.Text.Trim();
+        _settings.AutoAdvanceAfterApply = ChkAutoAdvance.IsChecked == true;
         _settings.DeleteSamples = ChkDeleteSamples.IsChecked == true;
         _settings.DeleteJunkFiles = ChkDeleteJunk.IsChecked == true;
         _settings.DeleteToRecycleBin = ChkRecycleBin.IsChecked == true;
@@ -338,6 +510,36 @@ public partial class SettingsWindow
         // withdraw is not really optional.
         _settings.AcoustIdApiKey = TxtAcoustIdKey.Text.Trim();
 
+        // Not trimmed: a space is a legitimate stand-in, and trimming would turn
+        // that choice into the default without saying so. A cleared box keeps
+        // whatever was there, because a filename needs some character here.
+        if (TxtReplaceChar.Text.Length > 0
+            && !System.IO.Path.GetInvalidFileNameChars().Contains(TxtReplaceChar.Text[0]))
+            _settings.FilenameReplaceChar = TxtReplaceChar.Text[0];
+
+        // Saved as typed, blanks included - an emptied folder box is somebody
+        // saying they no longer watch that folder.
+        _settings.ComicFolders = TxtComicFolder.Text.Trim() is { Length: > 0 } cf ? [cf] : [];
+        _settings.BookFolders = TxtBookFolder.Text.Trim() is { Length: > 0 } bf ? [bf] : [];
+        _settings.ComicDestination = TxtComicLibrary.Text.Trim();
+        _settings.EbookDestination = TxtBookLibrary.Text.Trim();
+        _settings.ReadBookMetadata = ChkReadInside.IsChecked == true;
+
+        // A pattern that produces nothing would put every issue on one name, so
+        // an emptied box keeps whatever worked before.
+        if (!string.IsNullOrWhiteSpace(TxtComicPattern.Text))
+            _settings.ComicFileFormat = TxtComicPattern.Text.Trim();
+
+        if (!string.IsNullOrWhiteSpace(TxtBookPattern.Text))
+            _settings.BookFileFormat = TxtBookPattern.Text.Trim();
+
+        // Same shape as the keys above: emptying the box withdraws the source,
+        // which is the only way to stop asking it.
+        _settings.GcdDatabasePath = TxtGcdPath.Text.Trim();
+        _settings.MetronUser = TxtMetronUser.Text.Trim();
+        _settings.MetronPassword = TxtMetronPassword.Password;
+        _settings.ComicVineApiKey = TxtComicVineKey.Text.Trim();
+
         // Saved as typed, blanks included. A library folder somebody has
         // emptied is one they want the button to ask about again, and refusing
         // to clear it would strand a destination on a drive that has gone.
@@ -372,6 +574,28 @@ public partial class SettingsWindow
         }
 
         _settings.SearchTermFilters = filters;
+
+        // Written here, so every caller of this dialog gets the same answer.
+        //
+        // Save used to change the settings in memory only, and one caller -
+        // the video window - happened to persist them afterwards while
+        // reloading its services. Nothing else did, and nothing saves on
+        // shutdown, so a comic folder, a library destination, a Metron
+        // password and a Comic Vine key typed on the Books tab worked all
+        // session and were gone at the next launch.
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Saving settings", ex);
+
+            MessageBox.Show(this,
+                $"Your settings could not be written to disk.\n\n{ex.Message}\n\n"
+                + "They will apply for this session, but will be gone when PyreMedia closes.",
+                "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
 
         DialogResult = true;
         Close();
@@ -410,8 +634,19 @@ public partial class SettingsWindow
     }
 
     /// <summary>Resolve a tool on PATH or as a literal path, and report it.</summary>
-    private static void ShowToolStatus(TextBlock label, Wpf.Ui.Controls.HyperlinkButton link,
-                                       string command, string friendly)
+    /// <param name="link">
+    /// Hidden once the tool is found. Null where the link is worth keeping
+    /// either way - a player is optional, and somebody may want a better one
+    /// than the one already installed.
+    /// </param>
+    /// <param name="missing">
+    /// What is lost without it. Said per tool rather than in one sentence about
+    /// remuxing, because the player has nothing to do with remuxing and telling
+    /// somebody it does sends them looking in the wrong place.
+    /// </param>
+    private static void ShowToolStatus(TextBlock label, Wpf.Ui.Controls.HyperlinkButton? link,
+                                       string command, string friendly,
+                                       string missing = "remuxing needs it")
     {
         var found = ResolveTool(command);
 
@@ -419,13 +654,13 @@ public partial class SettingsWindow
         {
             label.Text = $"Found: {found}";
             label.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
-            link.Visibility = Visibility.Collapsed;
+            if (link is not null) link.Visibility = Visibility.Collapsed;
         }
         else
         {
-            label.Text = $"{friendly} not found - remuxing needs it";
+            label.Text = $"{friendly} not found - {missing}";
             label.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCautionBrush");
-            link.Visibility = Visibility.Visible;
+            if (link is not null) link.Visibility = Visibility.Visible;
         }
     }
 
@@ -558,15 +793,17 @@ public partial class SettingsWindow
     {
         var answer = MessageBox.Show(this,
             "Put every option back to how it shipped?\n\n"
-            + "Your scan folders and API keys are kept. Everything else - naming formats, "
-            + "languages, keep rules, cleanup, remux and NFO options, tool paths, per-show "
-            + "pins and offsets - goes back to default.\n\n"
+            + "Your scan folders, your libraries and your API keys are kept - for video, "
+            + "music, comics and ebooks alike. Everything else - naming formats, languages, "
+            + "keep rules, cleanup, remux and NFO options, tool paths, per-show pins and "
+            + "offsets - goes back to default.\n\n"
             + "Your last saved settings are copied to settings.backup.json first, so this can "
             + "be undone by hand if you change your mind. Any unsaved edits on screen are "
             + "discarded.\n\n"
             + "Nothing on disk is touched, and your history is not affected.\n\n"
-            + "Yes  -  reset, keeping folders and keys\n"
-            + "No   -  reset everything, including folders\n"
+            + "Yes  -  reset, keeping every folder and key\n"
+            + "No   -  reset everything, including folders AND keys - nothing can be "
+            + "searched for until you paste your TMDb key back in\n"
             + "Cancel  -  change nothing",
             "Reset to defaults", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
 

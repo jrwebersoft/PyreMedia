@@ -204,7 +204,7 @@ public static class AsfWriter
     /// it - ReplayGain, encoder settings and MusicBrainz ids from a previous
     /// tagger all live here, and dropping them would be a silent loss.
     /// </summary>
-    private static byte[] BuildExtended(byte[]? existing, TagEdit edit)
+    internal static byte[] BuildExtended(byte[]? existing, TagEdit edit)
     {
         var descriptors = ReadExtended(existing);
 
@@ -217,7 +217,7 @@ public static class AsfWriter
             // An empty value means the field was cleared, and a descriptor with
             // no value is worse than none - readers report it as an empty tag
             // rather than an absent one.
-            if (value.Length > 0) descriptors.Add((name, value));
+            if (value.Length > 0) descriptors.Add(new Descriptor(name, 0, value, []));
         }
 
         // The names Windows Media and Kodi actually read. Deliberately the same
@@ -231,15 +231,35 @@ public static class AsfWriter
         Set("MusicBrainz/Track Id", edit.MusicBrainzTrackId);
         Set("MusicBrainz/Album Id", edit.MusicBrainzAlbumId);
 
+        // ReplayGain, which this writer used to ignore entirely. Every WMA was
+        // decoded end to end - the slowest thing the program does - rewritten
+        // in full, reported as written and recorded as undoable, and not one
+        // gain figure reached the file.
+        //
+        // These are the names Windows Media and foobar2000 both read. The
+        // uppercase form is what every other writer here emits, so a library of
+        // mixed formats ends up saying the same thing in the same words.
+        Set("REPLAYGAIN_TRACK_GAIN", edit.TrackGain);
+        Set("REPLAYGAIN_TRACK_PEAK", edit.TrackPeak);
+        Set("REPLAYGAIN_ALBUM_GAIN", edit.AlbumGain);
+        Set("REPLAYGAIN_ALBUM_PEAK", edit.AlbumPeak);
+
         using var memory = new MemoryStream();
         var countBytes = new byte[2];
         BinaryPrimitives.WriteUInt16LittleEndian(countBytes, (ushort)descriptors.Count);
         memory.Write(countBytes);
 
-        foreach (var (name, value) in descriptors)
+        foreach (var d in descriptors)
         {
-            var nameBytes = Encode(name);
-            var valueBytes = Encode(value);
+            var nameBytes = Encode(d.Name);
+
+            // Bytes this code does not understand go back exactly as they came,
+            // under their own type. Text goes back as type 0: track numbers are
+            // written as strings rather than as the DWORD some taggers use,
+            // because every reader handles the string and only some handle the
+            // number.
+            var valueBytes = d.IsBinary ? d.Raw : Encode(d.Text);
+            var type = d.IsBinary ? d.Type : (ushort)0;
 
             var lengthBytes = new byte[2];
 
@@ -247,10 +267,7 @@ public static class AsfWriter
             memory.Write(lengthBytes);
             memory.Write(nameBytes);
 
-            // Type 0 is a Unicode string. Track numbers are written as strings
-            // rather than as the DWORD some taggers use, because every reader
-            // handles the string and only some handle the number.
-            BinaryPrimitives.WriteUInt16LittleEndian(lengthBytes, 0);
+            BinaryPrimitives.WriteUInt16LittleEndian(lengthBytes, type);
             memory.Write(lengthBytes);
 
             BinaryPrimitives.WriteUInt16LittleEndian(lengthBytes, (ushort)valueBytes.Length);
@@ -261,9 +278,9 @@ public static class AsfWriter
         return memory.ToArray();
     }
 
-    private static List<(string Name, string Value)> ReadExtended(byte[]? body)
+    internal static List<Descriptor> ReadExtended(byte[]? body)
     {
-        var descriptors = new List<(string, string)>();
+        var descriptors = new List<Descriptor>();
         if (body is null || body.Length < 2) return descriptors;
 
         var count = BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(0, 2));
@@ -298,18 +315,35 @@ public static class AsfWriter
                 3 when raw.Length >= 4 => BinaryPrimitives.ReadUInt32LittleEndian(raw).ToString(),
                 4 when raw.Length >= 8 => BinaryPrimitives.ReadUInt64LittleEndian(raw).ToString(),
                 5 when raw.Length >= 2 => BinaryPrimitives.ReadUInt16LittleEndian(raw).ToString(),
-
-                // Type 1 is arbitrary bytes - usually embedded cover art, which
-                // is far bigger than anything else here and must not be turned
-                // into text. Dropped rather than mangled, and the sweep removes
-                // embedded art anyway.
-                _ => ""
+                _ => null
             };
 
-            if (name.Length > 0 && value.Length > 0) descriptors.Add((name, value));
+            if (name.Length == 0) continue;
+
+            // Type 1 is arbitrary bytes, and that is where WM/Picture - the
+            // embedded cover art - lives. It used to be turned into an empty
+            // string and then dropped for being empty, so correcting a track
+            // number silently destroyed the artwork. Nothing here can read it
+            // and nothing here needs to, so it is carried through untouched.
+            if (value is null)
+            {
+                descriptors.Add(new Descriptor(name, type, "", raw.ToArray()));
+                continue;
+            }
+
+            if (value.Length > 0) descriptors.Add(new Descriptor(name, 0, value, []));
         }
 
         return descriptors;
+    }
+
+    /// <summary>
+    /// One entry of the Extended Content Description Object. Either text this
+    /// code understands, or bytes it does not and passes through as they were.
+    /// </summary>
+    internal readonly record struct Descriptor(string Name, ushort Type, string Text, byte[] Raw)
+    {
+        public bool IsBinary => Raw.Length > 0;
     }
 
     /// <summary>UTF-16LE with the null terminator the format counts in its lengths.</summary>

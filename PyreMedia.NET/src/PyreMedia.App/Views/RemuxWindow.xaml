@@ -21,14 +21,21 @@
 
         <ui:TitleBar Grid.Row="0" Title="Remux" ShowMaximize="True" />
 
-        <!-- This rewrites files, so say so plainly and up front -->
-        <ui:InfoBar Grid.Row="1" Margin="20,4,20,10" IsOpen="True" IsClosable="False"
+        <!-- This rewrites files, so say so plainly and up front - and let it be
+             dismissed, because it is five lines of the window every time and
+             the point lands on the first read. -->
+        <ui:InfoBar Grid.Row="1" x:Name="Warning" Margin="20,4,20,10" IsOpen="True" IsClosable="True"
                     Severity="Warning" Title="This rewrites your media files"
                     Message="Tracks are removed by remuxing with ffmpeg. No re-encoding, so quality is untouched and it's fast - but dropped tracks are gone. Nothing happens to the file you have until the new one has been written and checked; what becomes of it then is set below. Renaming is unaffected by anything here." />
 
-        <!-- Rules -->
+        <!-- Rules.
+             Folded away once there is a track list to work through: these are
+             answered once and then sit there taking a third of the window from
+             the thing you are actually reading. Still one click from open. -->
         <ui:Card Grid.Row="2" Margin="20,0,20,10" Padding="14">
-            <StackPanel>
+            <Expander x:Name="Rules" IsExpanded="True"
+                      Header="What to keep, and what becomes of the original">
+            <StackPanel Margin="0,10,0,0">
 
                 <!-- What becomes of the file as it is now. Shown here rather than
                      asked in a dialog: it is part of the job being set up, and a
@@ -76,6 +83,7 @@
                                Click="OnAnalyse" Appearance="Primary" />
                 </Grid>
             </StackPanel>
+            </Expander>
         </ui:Card>
 
         <!-- Layout groups -->
@@ -87,9 +95,30 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" x:Name="TxtSummary" Margin="14,12,14,8" FontWeight="SemiBold"
-                           TextWrapping="Wrap"
-                           Text="Press Analyse to read the track layout of your files." />
+                <Grid Grid.Row="0" Margin="14,12,14,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" x:Name="TxtSummary" FontWeight="SemiBold"
+                               VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,10,0"
+                               Text="Press Analyse to read the track layout of your files." />
+
+                    <!-- Every group arrives ticked, which is right for a shelf
+                         you mean to do wholesale and wrong for picking one out
+                         of fourteen. Unticking thirteen by hand was the only
+                         way to remux a single layout. -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" x:Name="PickAll"
+                                Visibility="Collapsed">
+                        <ui:Button Content="All" Click="OnIncludeAll" Appearance="Secondary"
+                                   Padding="12,4" Margin="0,0,6,0"
+                                   ToolTip="Include every layout" />
+                        <ui:Button Content="None" Click="OnIncludeNone" Appearance="Secondary"
+                                   Padding="12,4"
+                                   ToolTip="Include none of them, then tick the ones you want" />
+                    </StackPanel>
+                </Grid>
 
                 <!-- Skipped files are their own block: appended to the summary
                      they ran off the panel edge, and bolding them buried the

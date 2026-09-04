@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
@@ -178,6 +178,8 @@ public partial class EpisodeMapWindow
         }
 
         var existing = Rows.ToDictionary(r => r.File, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var r in Rows) r.PropertyChanged -= OnRowEdited;
         Rows.Clear();
 
         foreach (var file in _item.Files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
@@ -186,8 +188,26 @@ public partial class EpisodeMapWindow
             var parsedRef = EpisodeMatcher.Parse(fileName);
 
             EpisodeChoice? parsed = null;
+
+            // Where the row starts, which is not the same thing as what the
+            // filename says.
+            //
+            // A saved shift for this season is already applied everywhere else,
+            // so building these rows from the raw parse made this screen
+            // disagree with the preview behind it by exactly that shift. Worse,
+            // Accept then measured chosen-against-parsed, found no difference,
+            // and recorded "shifted by 0" - which deletes the entry. Opening
+            // Renumber and pressing Accept destroyed the setting the screen
+            // exists to edit.
+            EpisodeChoice? seeded = null;
+
             if (parsedRef is { } p && p.Season is { } se)
+            {
                 parsed = Find(se, p.Episode);
+
+                var shift = se > 0 ? _settings.EpisodeOffset(_show.Id, se) : 0;
+                seeded = shift == 0 ? parsed : Find(se, p.Episode + shift) ?? parsed;
+            }
 
             var row = new MapRow
             {
@@ -206,15 +226,16 @@ public partial class EpisodeMapWindow
                 row.Confidence = old.Confidence;
 
                 if (old.Chosen is { } oc)
-                    row.Chosen = Find(oc.Episode.SeasonNumber, oc.Episode.Number) ?? parsed;
+                    row.Chosen = Find(oc.Episode.SeasonNumber, oc.Episode.Number) ?? seeded;
                 else
-                    row.Chosen = parsed;
+                    row.Chosen = seeded;
             }
             else
             {
-                row.Chosen = parsed;
+                row.Chosen = seeded;
             }
 
+            row.PropertyChanged += OnRowEdited;
             Rows.Add(row);
         }
 
@@ -427,6 +448,23 @@ public partial class EpisodeMapWindow
                _settings.FilenameReplaceChar)
            + Path.GetExtension(_item.Files.FirstOrDefault() ?? ".mkv");
 
+    /// <summary>
+    /// Recount after a row is edited by hand.
+    ///
+    /// Nothing listened to these. UpdateSummary owns the "N assigned twice"
+    /// warning and the OK button, and it ran only on a rebuild or a bulk tool -
+    /// so picking an episode in a row's own dropdown, which is the entire point
+    /// of the screen, left both stale. Two files could be pointed at one episode
+    /// with no complaint and OK still enabled.
+    /// </summary>
+    private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSummary();
+
+    private void OnRowEdited(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MapRow.Chosen) or nameof(MapRow.Include))
+            UpdateSummary();
+    }
+
     private void UpdateSummary()
     {
         var used = Rows.Count(r => r.Include && r.Chosen is not null);
@@ -451,6 +489,10 @@ public partial class EpisodeMapWindow
             .Count(g => g.Count() > 1);
 
         if (dupes > 0) parts.Add($"{dupes} episode(s) assigned twice");
+
+        // Which rows the buttons will touch, when that is not all of them.
+        var picked = Grid.SelectedItems.OfType<MapRow>().Count();
+        if (picked > 1) parts.Add($"tools act on the {picked} selected");
 
         TxtSummary.Text = string.Join("   |   ", parts);
         TxtShow.Text = _show.Name;
@@ -588,10 +630,39 @@ public partial class EpisodeMapWindow
     }
 
     /// <summary>
-    /// The rows the bulk tools act on: the ones on screen. Switching a season on
-    /// and then shifting everything is the whole point of switching it on.
+    /// The rows the bulk tools act on: the ones on screen, in the order they are
+    /// on screen. Switching a season on and then shifting everything is the whole
+    /// point of switching it on.
+    ///
+    /// Read from the view, not from Rows. Rows is path order; the view is
+    /// whatever the last clicked column header made it. "Fill sequentially",
+    /// which describes itself as following the current file order, was filling
+    /// against path order while the user read a different one off the screen.
     /// </summary>
-    private List<MapRow> Working => Rows.Where(r => InSelectedSeason(r)).ToList();
+    private List<MapRow> Working
+    {
+        get
+        {
+            var onScreen = Ordered();
+
+            // A selection means "these ones".
+            //
+            // Ctrl and Shift already picked rows out of the grid - it has always
+            // been Extended - and the bulk tools were the only thing not
+            // looking. Two or more, deliberately: clicking a row to reach its
+            // dropdown selects it, and a Shift that quietly acted on that one
+            // row would be worse than one that acted on everything.
+            var picked = Grid.SelectedItems.OfType<MapRow>().ToHashSet();
+
+            return picked.Count > 1
+                ? [.. onScreen.Where(picked.Contains)]
+                : onScreen;
+        }
+    }
+
+    /// <summary>The rows on screen, in the order they are on screen.</summary>
+    private List<MapRow> Ordered() =>
+        _view is null ? [.. Rows.Where(InSelectedSeason)] : [.. _view.Cast<MapRow>()];
 
     // ---------------- Bulk tools ----------------
 
@@ -645,11 +716,29 @@ public partial class EpisodeMapWindow
 
         if (start < 0) start = 0;
 
+        // Stop at the end of the season being filled, not the end of the show.
+        // AllEpisodes is every season flattened, so thirteen files against a
+        // ten-episode season used to spill into 3x01..3x03 without a word.
+        var season = included[0].Chosen?.Episode.SeasonNumber;
+
+        var filled = 0;
+
         for (var i = 0; i < included.Count && start + i < AllEpisodes.Count; i++)
         {
-            included[i].Chosen = AllEpisodes[start + i];
+            var next = AllEpisodes[start + i];
+            if (season is { } s && next.Episode.SeasonNumber != s) break;
+
+            included[i].Chosen = next;
             included[i].Confidence = -1;
             included[i].Alternative = null;
+            filled++;
+        }
+
+        if (filled < included.Count)
+        {
+            TxtSummary.Text = $"Filled {filled} of {included.Count} - "
+                              + $"season {season} has no more episodes to give.";
+            return;
         }
 
         UpdateSummary();
@@ -657,14 +746,90 @@ public partial class EpisodeMapWindow
 
     private void Shift(int by)
     {
+        // Inside each row's own season.
+        //
+        // This used to step through AllEpisodes, which is every season
+        // flattened with Specials at the front, so shifting 1x01 down by one
+        // landed it on the last special and 2x01 down by one landed on 1x13. A
+        // shift is a correction within a season, not a walk through the series.
+        var moved = new List<(MapRow Row, EpisodeChoice To)>();
+
         foreach (var row in Working.Where(r => r.Include && r.Chosen is not null))
         {
-            var idx = AllEpisodes.IndexOf(row.Chosen!) + by;
-            if (idx >= 0 && idx < AllEpisodes.Count)
-                row.Chosen = AllEpisodes[idx];
+            var season = row.Chosen!.Episode.SeasonNumber;
+
+            // Nothing past either end. The bounds check used to be per row, so
+            // the row at the edge stayed put while the rest moved - which
+            // quietly put two files on one episode, and surfaced only as an OK
+            // button that would not enable and no explanation.
+            if (Find(season, row.Chosen.Episode.Number + by) is not { } target)
+            {
+                TxtSummary.Text = $"Shifting by {by:+#;-#;0} would take "
+                                  + $"{row.FileName} outside season {season} - nothing moved.";
+                return;
+            }
+
+            moved.Add((row, target));
         }
 
+        foreach (var (row, to) in moved) row.Chosen = to;
+
         UpdateSummary();
+    }
+
+    /// <summary>
+    /// Read the rows on screen as another season, keeping their episode numbers.
+    ///
+    /// "These are season 2, not season 1" had no expression at all. Shift moves
+    /// by one through the flat episode list, so saying it meant clicking
+    /// thirteen times and crossing a season boundary on the way - and the
+    /// numbering that came out the other side was whatever the walk landed on.
+    ///
+    /// Nothing is invented: an episode number the target season does not have
+    /// leaves its row alone and is reported, rather than being filled with the
+    /// nearest thing.
+    /// </summary>
+    private void OnMoveSeason(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(TxtMoveSeason.Text?.Trim(), out var target) || target < 0)
+        {
+            TxtSummary.Text = "Give the season to move these into - a number, like 2.";
+            return;
+        }
+
+        var rows = Working.Where(r => r.Include && r.Chosen is not null).ToList();
+        if (rows.Count == 0) return;
+
+        var moved = new List<(MapRow Row, EpisodeChoice To)>();
+        var missing = new List<int>();
+
+        foreach (var row in rows)
+        {
+            var number = row.Chosen!.Episode.Number;
+
+            if (Find(target, number) is { } to) moved.Add((row, to));
+            else missing.Add(number);
+        }
+
+        foreach (var (row, to) in moved)
+        {
+            row.Chosen = to;
+            row.Confidence = -1;
+            row.Alternative = null;
+        }
+
+        // The season chips are built from what the rows hold, so they have to be
+        // rebuilt or the season these just moved to has no chip and the rows
+        // vanish behind the old filter.
+        FillSeasons();
+        UpdateSummary();
+
+        if (missing.Count > 0)
+            TxtSummary.Text = $"Moved {moved.Count} to season {target}. "
+                              + $"Season {target} has no episode "
+                              + string.Join(", ", missing.Take(5))
+                              + (missing.Count > 5 ? $" or {missing.Count - 5} more" : "")
+                              + " - those were left as they were.";
     }
 
     private void OnShiftDown(object sender, RoutedEventArgs e) => Shift(-1);
@@ -699,10 +864,12 @@ public partial class EpisodeMapWindow
     /// persist and keep working for files that arrive later - per-file overrides
     /// only ever cover the files in front of us right now.
     /// </summary>
-    private void PersistUniformShift()
+    private Dictionary<int, int> PersistUniformShift()
     {
         var included = Rows.Where(r => r.Include).ToList();
-        if (included.Count == 0) return;
+        var saved = new Dictionary<int, int>();
+
+        if (included.Count == 0) return saved;
 
         // Every row must have both a parsed and a chosen episode in the same
         // season, or "shifted by N" isn't a meaningful description of it.
@@ -710,10 +877,26 @@ public partial class EpisodeMapWindow
         // right in season 1, and one number for the show can't say that.
         var bySeason = new Dictionary<int, List<int>>();
 
+        // Seasons holding a row that "shifted by N" cannot describe. These used
+        // to abandon the whole method, so one file with an unreadable name, or
+        // one moved to another season, stopped every other season being
+        // recorded - including the ones that were perfectly uniform.
+        var cannotDescribe = new HashSet<int>();
+
         foreach (var r in included)
         {
-            if (r.Chosen is not { } c || r.Parsed is not { } p) return;
-            if (c.Episode.SeasonNumber != p.Episode.SeasonNumber) return;
+            if (r.Chosen is not { } c || r.Parsed is not { } p)
+            {
+                if (r.Chosen?.Episode.SeasonNumber is { } orphan) cannotDescribe.Add(orphan);
+                continue;
+            }
+
+            if (c.Episode.SeasonNumber != p.Episode.SeasonNumber)
+            {
+                cannotDescribe.Add(c.Episode.SeasonNumber);
+                cannotDescribe.Add(p.Episode.SeasonNumber);
+                continue;
+            }
 
             var season = c.Episode.SeasonNumber;
             if (season <= 0) continue;              // specials keep their own numbering
@@ -731,18 +914,24 @@ public partial class EpisodeMapWindow
             // Only a season where every file moved by the same amount describes a
             // shift. Anything else is a set of individual corrections, and those
             // are recorded as per-file assignments instead.
+            if (cannotDescribe.Contains(season)) continue;
             if (deltas.Distinct().Count() != 1) continue;
 
             _settings.SetEpisodeOffset(_show.Id, season, deltas[0]);
+            saved[season] = deltas[0];
             changed = true;
         }
 
         if (changed) _settings.Save();
+
+        return saved;
     }
 
     private void OnAccept(object sender, RoutedEventArgs e)
     {
-        PersistUniformShift();
+        // What was recorded as a whole-season shift. Rows explained by it need
+        // no override of their own - see below.
+        var shifts = PersistUniformShift();
 
         var result = new EpisodeOverrides();
 
@@ -754,8 +943,24 @@ public partial class EpisodeMapWindow
                 continue;
             }
 
-            if (row.Chosen is { } c)
-                result.Map[row.File] = (c.Episode.SeasonNumber, c.Episode.Number);
+            if (row.Chosen is not { } c) continue;
+
+            // Only what was actually changed.
+            //
+            // An override is a single season-and-episode pair, so recording one
+            // for an untouched row throws away anything the filename said that
+            // a pair cannot hold - a file named "S01E01-E02" came back as
+            // "S01E01" and the second episode vanished from the name, purely
+            // because the screen had been opened and accepted. A row that still
+            // agrees with its filename needs no override; the parser will read
+            // it the same way next time, span and all.
+            if (row.Parsed is { } parsed
+                && parsed.Episode.SeasonNumber == c.Episode.SeasonNumber
+                && c.Episode.Number - parsed.Episode.Number
+                   == (shifts.TryGetValue(c.Episode.SeasonNumber, out var by) ? by : 0))
+                continue;
+
+            result.Map[row.File] = (c.Episode.SeasonNumber, c.Episode.Number);
         }
 
         Result = result;

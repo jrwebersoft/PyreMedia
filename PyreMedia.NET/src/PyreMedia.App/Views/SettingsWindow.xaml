@@ -1,4 +1,4 @@
-<ui:FluentWindow x:Class="PyreMedia.App.Views.SettingsWindow"
+﻿<ui:FluentWindow x:Class="PyreMedia.App.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -24,7 +24,7 @@
              column meant hunting for the one you wanted, and the window had
              grown a Libraries section, an AcoustID key and an audiobook
              pattern since it was last looked at. -->
-        <TabControl Grid.Row="1" Margin="16,4,16,0" BorderThickness="0"
+        <TabControl Grid.Row="1" x:Name="Tabs" Margin="16,4,16,0" BorderThickness="0"
                     Background="Transparent">
 
             <TabItem Header="Folders">
@@ -182,6 +182,13 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <TextBlock Text="Stand-in for characters Windows will not allow" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtReplaceChar" Width="60" HorizontalAlignment="Left"
+                                            MaxLength="1" Margin="0,0,0,4" />
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="Episode titles contain : ? / and &quot; often enough to matter, and none of them can appear in a filename. Each becomes this character instead. Films and television only - comics and ebooks replace each character with something chosen to suit it, so a colon becomes a spaced dash rather than whatever is set here." />
+
                                 <CheckBox x:Name="ChkRenameFolder"
                                           Content="Rename the containing folder to match the title"
                                           Margin="0,0,0,4" />
@@ -210,6 +217,9 @@
                                 <CheckBox x:Name="ChkScanOnLaunch" Content="Scan the video folders when the window opens" Margin="0,0,0,2" />
                                 <TextBlock Text="On by default. Scanning only reads - nothing is proposed until you pick a match, and nothing happens until Apply. Turn it off if your folders sit on a drive that has to spin up or a share that has to reconnect."
                                            TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
+                                <CheckBox x:Name="ChkAutoAdvance" Content="Move to the next item after Apply" Margin="0,0,0,2" />
+                                <TextBlock Text="Off by default. Applying a change and having the selection jump elsewhere takes the item you were just working on off the screen before you have seen what happened to it - the .nfo and the artwork are written straight after the rename, and the row that reports them is the one it has already left. This is the same switch as the tick box beside Apply."
+                                           TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
                                 <CheckBox x:Name="ChkOverwrite" Content="Overwrite existing files at the target path" Margin="0,0,0,6" />
                                 <CheckBox x:Name="ChkAutoSelect" Content="Automatically pick the first search result" Margin="0,0,0,6" />
                                 <CheckBox x:Name="ChkCombineSeasons"
@@ -227,7 +237,13 @@
                                 <TextBlock Text="Video extensions (semicolon separated)" Margin="0,0,0,4" />
                                 <ui:TextBox x:Name="TxtVideoExt" Margin="0,0,0,10" />
                                 <TextBlock Text="Subtitle extensions" Margin="0,0,0,4" />
-                                <ui:TextBox x:Name="TxtSubExt" />
+                                <ui:TextBox x:Name="TxtSubExt" Margin="0,0,0,10" />
+
+                                <CheckBox x:Name="ChkDiscImages" Content="Organise disc images too" Margin="0,0,0,2" />
+                                <TextBlock Text="On by default. A folder of .iso files is a shelf of films with nothing tidying them, and naming one needs no more than reading its name. They are named, filed and moved like any film and never opened - remuxing an .iso is not a thing that can happen, and reading one for its tracks reads a filesystem rather than a stream, so they stay out of both."
+                                           TextWrapping="Wrap" Opacity="0.7" FontSize="12" Margin="26,0,0,6" />
+                                <TextBlock Text="Disc image extensions" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtDiscExt" />
                             </StackPanel>
                         </ui:Card>
 
@@ -434,6 +450,30 @@
                                                                         NavigateUri="https://github.com/quietvoid/dovi_tool/releases"
                                                                         FontSize="11" Padding="0" />
                                                 </StackPanel>
+
+                                                <!-- The Video tab tells people to come here for the player,
+                                                     so there has to be somewhere here to put it. -->
+                                                <TextBlock Text="Player path (optional)" Margin="0,12,0,4" />
+                                                <Grid Margin="0,0,0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ui:TextBox x:Name="TxtPlayer" Margin="0,0,6,0"
+                                                                PlaceholderText="vlc" />
+                                                    <ui:Button Grid.Column="1" Content="..." Appearance="Secondary"
+                                                               Padding="10,3" Click="OnPickPlayer" />
+                                                </Grid>
+                                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"
+                                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                           Text="What Play opens a file with. Just &quot;vlc&quot; works when VLC is on the PATH, which a normal install is not - so if Play opens files in whatever Windows would use, point this at vlc.exe. Without a player of its own Play still works; what is lost is control, since Windows offers no way to ask for full screen or to start part-way in." />
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock x:Name="TxtPlayerStatus" FontSize="11" VerticalAlignment="Center"
+                                                               Margin="0,0,10,0" />
+                                                    <ui:HyperlinkButton Content="Get VLC"
+                                                                        NavigateUri="https://www.videolan.org/vlc/"
+                                                                        FontSize="11" Padding="0" />
+                                                </StackPanel>
                             </StackPanel>
                         </ui:Card>
 
@@ -489,7 +529,7 @@
                         <ui:Card Margin="0,0,0,12" Padding="16">
                             <StackPanel>
                                 <TextBlock Text="Cleanup" FontWeight="SemiBold" Margin="0,0,0,4" />
-                                <TextBlock Text="On by default. Nothing here deletes anything on its own - each file appears as a ticked row in the preview that you can clear, and deletions go to the Recycle Bin where the drive has one. A .nfo holding real Kodi metadata is never offered: those are told apart by content, not by extension. Nor is a file still being downloaded."
+                                <TextBlock Text="On by default, and ticked by default - the point of the list is not to forget. Every file still appears as its own row saying exactly what will happen, and clearing the tick is enough to keep it; deletions go to the Recycle Bin where the drive has one, and History will undo them. The one thing not ticked for you is anything sizeable inside Extras, Deleted Scenes, Featurettes and the like, because a deleted scene and a sample clip look alike from the outside and only the folder tells them apart. A .nfo holding real Kodi metadata is never offered: those are told apart by content, not by extension. Nor is a file still being downloaded."
                                            FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                 <CheckBox x:Name="ChkDeleteSamples" Content="Offer to delete sample clips" Margin="0,0,0,6" />
@@ -578,6 +618,180 @@
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                            Text="Regex of noise removed from a folder name to suggest a search term." />
                                 <ui:TextBox x:Name="TxtFilters" TextWrapping="Wrap" AcceptsReturn="True" Height="80" />
+                            </StackPanel>
+                        </ui:Card>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Comics and books had their sources filed under Metadata, which
+                 is a film-and-television word. Somebody setting up comics
+                 looked in Metadata last, if at all. -->
+            <TabItem Header="Books">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,10,10,0">
+                    <StackPanel>
+
+                        <!-- These used to sit on the Books tab itself, taking
+                             the top third of the working surface and writing to
+                             this file on every keystroke. A screen with the
+                             settings page on it reads as a settings page. -->
+                        <ui:Card Margin="0,0,0,12" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Where comics live" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="Where .cbz and .cbr files are looked for, and where they go afterwards." />
+
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBox x:Name="TxtComicFolder" Margin="0,0,6,0"
+                                                PlaceholderText="Where your comics are now" />
+                                    <ui:Button Grid.Column="1" Content="..." Appearance="Secondary"
+                                               Padding="10,3" Click="OnPickBookFolder" Tag="comicsource" />
+                                </Grid>
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBox x:Name="TxtComicLibrary" Margin="0,0,6,0"
+                                                PlaceholderText="Where they should end up" />
+                                    <ui:Button Grid.Column="1" Content="..." Appearance="Secondary"
+                                               Padding="10,3" Click="OnPickBookFolder" Tag="comiclibrary" />
+                                </Grid>
+
+                                <TextBlock Text="Comic filename pattern" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtComicPattern" Margin="0,0,0,4"
+                                            TextChanged="OnBookPatternChanged" />
+                                <TextBlock x:Name="TxtComicExample" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="TxtComicProblem" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card Margin="0,0,0,12" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Where ebooks live" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="An EPUB knows its own title and author, so the filename is only the fallback." />
+
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBox x:Name="TxtBookFolder" Margin="0,0,6,0"
+                                                PlaceholderText="Where your ebooks are now" />
+                                    <ui:Button Grid.Column="1" Content="..." Appearance="Secondary"
+                                               Padding="10,3" Click="OnPickBookFolder" Tag="booksource" />
+                                </Grid>
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBox x:Name="TxtBookLibrary" Margin="0,0,6,0"
+                                                PlaceholderText="Where they should end up" />
+                                    <ui:Button Grid.Column="1" Content="..." Appearance="Secondary"
+                                               Padding="10,3" Click="OnPickBookFolder" Tag="booklibrary" />
+                                </Grid>
+
+                                <TextBlock Text="Ebook filename pattern" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtBookPattern" Margin="0,0,0,4"
+                                            TextChanged="OnBookPatternChanged" />
+                                <TextBlock x:Name="TxtBookExample" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="TxtBookProblem" FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+
+                                <CheckBox x:Name="ChkReadInside" Margin="0,12,0,0"
+                                          Content="Open each file and ask what it is" />
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="26,2,0,0"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="On by default. Both kinds are zips with metadata inside, and that is a fact where a filename is a guess. Turn it off only if your library sits on a share slow enough that opening every archive is the expensive part." />
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card Margin="0,0,0,12" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Comic sources" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="Asked in this order, and the order is by what a question costs rather than by which database is best. The first one that knows the issue answers it - they are not merged. None of this is needed to shelve comics: most already carry their series, issue and publisher inside them, and a scan reads that. These are for the ones that do not, and for checking the ones that do." />
+
+                                <TextBlock Text="Grand Comics Database dump  -  free, local, unlimited" Margin="0,0,0,4" />
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBox x:Name="TxtGcdPath" Margin="0,0,6,0"
+                                                PlaceholderText="Path to the .db file" />
+                                    <ui:Button Grid.Column="1" Content="..." Appearance="Secondary"
+                                               Padding="10,3" Click="OnPickGcd" />
+                                </Grid>
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="A SQLite dump of the whole database, about six gigabytes. It is not bundled and could not be: it is CC BY-SA 4.0, which carries attribution and share-alike obligations, so it comes from its own authors the way ffmpeg does. Downloaded once, it answers every question here with no network at all." />
+                                <ui:HyperlinkButton Content="Get it from comics.org/download"
+                                                    NavigateUri="https://www.comics.org/download/"
+                                                    Padding="0,2" Margin="0,0,0,10" />
+
+                                <TextBlock Text="Metron  -  free account, 5,000 questions a day" Margin="0,0,0,4" />
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ui:TextBox Grid.Column="0" x:Name="TxtMetronUser" Margin="0,0,6,0"
+                                                PlaceholderText="Username" />
+                                    <ui:PasswordBox Grid.Column="1" x:Name="TxtMetronPassword"
+                                                    PlaceholderText="Password" />
+                                </Grid>
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="Metron authenticates with your account password rather than a key, so this really is the password to that account. It is kept in the settings file in plain text, like every other credential here - if that is not acceptable, leave it empty and use the GCD dump, which needs no account at all." />
+                                <ui:HyperlinkButton Content="Sign up at metron.cloud"
+                                                    NavigateUri="https://metron.cloud/accounts/signup/"
+                                                    Padding="0,2" Margin="0,0,0,10" />
+
+                                <TextBlock Text="Comic Vine  -  free key, 200 questions an hour" Margin="0,0,0,4" />
+                                <ui:TextBox x:Name="TxtComicVineKey" Margin="0,0,0,2" />
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"
+                                           Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                           Text="Non-commercial use only - the key is revoked otherwise. Answers are cached so the same issue is never asked about twice. Most comics scraped by ComicRack already carry a Comic Vine id inside them, so this is a lookup rather than a search." />
+                                <ui:HyperlinkButton Content="Get a key at comicvine.gamespot.com/api"
+                                                    NavigateUri="https://comicvine.gamespot.com/api/"
+                                                    Padding="0,2" />
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card Margin="0,0,0,12" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="What works without any of them" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                                <TextBlock FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Text="Shelving, series grouping, missing-issue detection, the page reader, advert detection and searchable text all work with no source set up at all. They read what is inside the file." />
+
+                                <TextBlock FontSize="12" TextWrapping="Wrap"
+                                           Text="A source adds a second opinion: somewhere to check what a comic claims about itself, and somewhere to ask about the ones that claim nothing. Measured on a real shelf, about 97% of .cbz files already carry their own series and issue - so a source is for the remainder, not for the bulk." />
+                            </StackPanel>
+                        </ui:Card>
+
+                        <ui:Card Margin="0,0,0,12" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Ebooks" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                                <TextBlock FontSize="12" TextWrapping="Wrap"
+                                           Text="No source and no key. An EPUB carries its own title, author and series, which is exact rather than looked up. PDF and Amazon's formats carry nothing this reads, so those are filed from their filenames and say so." />
                             </StackPanel>
                         </ui:Card>
 

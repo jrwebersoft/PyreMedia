@@ -190,18 +190,35 @@ public sealed class MetadataService : IDisposable
         };
 
         var bySeason = new Dictionary<int, Dictionary<int, Episode>>();
+        var posters = new Dictionary<int, string>();
 
         void Absorb(TvShow src, bool isPrimary)
         {
             foreach (var season in src.Seasons)
             {
+                // First source with a poster for a season keeps it, so the
+                // primary wins and the secondary fills what it did not have.
+                if (season.PosterUrl is { } art && !posters.ContainsKey(season.Number))
+                    posters[season.Number] = art;
+
                 if (!bySeason.TryGetValue(season.Number, out var eps))
                     bySeason[season.Number] = eps = [];
 
                 foreach (var ep in season.Episodes)
                 {
-                    if (isPrimary || !eps.ContainsKey(ep.Number))
+                    if (isPrimary || !eps.TryGetValue(ep.Number, out var already))
+                    {
                         eps[ep.Number] = ep;
+                        continue;
+                    }
+
+                    // The primary keeps the episode, but a field it simply does
+                    // not have is worth taking from the other. Stills are the
+                    // case that matters: TMDb has none for a lot of older shows
+                    // and TheTVDB often does, and throwing that away would leave
+                    // the episode with no picture for no reason.
+                    if (already.StillUrl is null && ep.StillUrl is not null)
+                        eps[ep.Number] = already.WithStill(ep.StillUrl);
                 }
             }
         }
@@ -217,6 +234,7 @@ public sealed class MetadataService : IDisposable
             merged.Seasons.Add(new Season
             {
                 Number = number,
+                PosterUrl = posters.GetValueOrDefault(number),
                 Episodes = [.. eps.Values.OrderBy(e => e.Number)]
             });
         }

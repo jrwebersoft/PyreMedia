@@ -75,5 +75,20 @@ public static class SectionScroll
         // Nothing left inside: move the page on to the next section.
         return new ScrollMove(ScrollTarget.Page, -delta);
     }
+
+    /// <summary>
+    /// The move to hand a section's own scroller, in the units it speaks.
+    ///
+    /// ScrollToVerticalOffset takes the scroller's units, and anything built on
+    /// ItemsControl counts items rather than pixels unless told otherwise -
+    /// CanContentScroll defaults to true. Handing one the pixel move
+    /// <see cref="Decide"/> asks for moved the library list 120 rows a notch,
+    /// which on a library of ten items is "jump to the end".
+    /// </summary>
+    /// <param name="byItem">Whether the scroller counts items rather than pixels.</param>
+    /// <param name="by">The pixel move <see cref="Decide"/> asked for.</param>
+    /// <param name="linesPerNotch">What Windows says a notch is worth.</param>
+    public static double InnerStep(bool byItem, double by, int linesPerNotch) =>
+        byItem ? System.Math.Sign(by) * System.Math.Max(1, linesPerNotch) : by;
 }
 
