@@ -145,9 +145,16 @@ public static class SceneImages
                 // A folder that is nothing but images is somebody's pictures, or
                 // a comic stored as loose pages. Either way it is not litter
                 // beside media, and taking it apart file by file would be wrong.
+                //
+                // Unless the folder says outright what it is. A folder called
+                // Screens holding nothing but screens is the clearest case
+                // there is, and this guard was throwing exactly those away:
+                // four grabs were swept and five were not, which is not a
+                // distinction anybody could have predicted from the outside.
                 var pictures = files.Count(IsPicture);
+                var declared = ProofFolder.IsMatch(System.IO.Path.GetFileName(dir));
 
-                if (pictures > 0 && pictures == files.Length && files.Length > 4)
+                if (!declared && pictures > 0 && pictures == files.Length && files.Length > 4)
                 {
                     foreach (var s in subs) queue.Enqueue(s);
                     continue;

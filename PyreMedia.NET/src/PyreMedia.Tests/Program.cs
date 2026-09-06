@@ -5523,6 +5523,792 @@ Console.WriteLine("\n=== a file with no audio you asked for is offered, not with
         && stripped.Keep.Any(s => s.Language == "fre"));
 }
 
+Console.WriteLine("\n=== an emptied release folder does not linger on its own empty subfolders ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-linger-{Guid.NewGuid():N}");
+
+    // The Reacher shape exactly: the episode has been filed away elsewhere, the
+    // grabs are being deleted in this same apply, and what the release folder
+    // is left holding is the empty folder they were in.
+    var release = Path.Combine(root, "Reacher.S04E06.1080p.x265-ELiTE");
+    var screens = Path.Combine(release, "Screens");
+    Directory.CreateDirectory(screens);
+
+    var grab = Path.Combine(screens, "Reacher.S04E06.1080p.x265-ELiTE.Screen0001.png");
+    File.WriteAllText(grab, "x");
+
+    // A second release folder that still holds something real, as the control.
+    var keep = Path.Combine(root, "Reacher.S04E05.1080p-TRB");
+    Directory.CreateDirectory(keep);
+    File.WriteAllText(Path.Combine(keep, "notes.txt"), "x");
+
+    var plan = new RenamePlan
+    {
+        ShowFolder = Path.Combine(root, "Reacher (2022)"),
+        Show = new TvShow { Id = "1", Name = "Reacher" },
+        Actions = [new PlannedAction { SourcePath = grab, Status = PlanStatus.Delete, DeleteReason = "a grab" }],
+        SourceFoldersToTidy = [release, keep]
+    };
+
+    Directory.CreateDirectory(plan.ShowFolder);
+
+    try
+    {
+        var result = new RenameExecutor(new PyreMediaSettings { DeleteToRecycleBin = false })
+            .Execute(plan, plan.Actions);
+
+        Check("the grab goes", result.Deleted == 1);
+
+        Check("and the release folder goes with it, empty subfolder and all",
+            !Directory.Exists(release));
+
+        // The half that must not change. A folder holding a real file is still
+        // somebody's, and is still left alone and reported.
+        Check("a release folder that still holds a file is kept",
+            Directory.Exists(keep) && File.Exists(Path.Combine(keep, "notes.txt")));
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== the .nfo carries the people, not just the plot ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-nfo-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var film = Path.Combine(root, "Domino (2005).mkv");
+        File.WriteAllText(film, "x");
+
+        var movie = new Movie
+        {
+            TmdbId = "1024",
+            Title = "Domino",
+            Overview = "A bounty hunter.",
+            ReleaseDate = "2005-10-14",
+            Tagline = "Heads you live.",
+            RuntimeMinutes = 127,
+            Certification = "R",
+            Rating = new Rating { Source = "themoviedb", Value = 6.15, Votes = 941 },
+            Genres = ["Action", "Crime"],
+            Countries = ["United States of America"],
+            Studios = ["New Line Cinema"],
+            Directors = [new Person { Name = "Tony Scott", Role = "Director" }],
+            Writers = [new Person { Name = "Richard Kelly", Role = "Screenplay" }],
+            Cast =
+            [
+                new Person { Name = "Keira Knightley", Role = "Domino Harvey", Order = 0, ThumbUrl = "https://x/k.jpg" },
+                new Person { Name = "Mickey Rourke", Role = "Ed Mosbey", Order = 1 }
+            ]
+        };
+
+        var result = NfoWriter.WriteMovie(film, movie, null, new PyreMediaSettings { WriteNfoFiles = true });
+
+        Check("the .nfo is written", result.Outcome == NfoWriter.Outcome.Written);
+
+        var doc = System.Xml.Linq.XDocument.Load(result.Path).Root!;
+
+        Check("the billed cast is there, in billing order",
+            doc.Elements("actor").Select(a => a.Element("name")?.Value).SequenceEqual(
+                ["Keira Knightley", "Mickey Rourke"]));
+
+        Check("with the character, the order and the headshot",
+            doc.Elements("actor").First() is { } first
+            && first.Element("role")?.Value == "Domino Harvey"
+            && first.Element("order")?.Value == "0"
+            && first.Element("thumb")?.Value == "https://x/k.jpg");
+
+        Check("an actor with no headshot simply has no thumb, not an empty one",
+            doc.Elements("actor").Last().Element("thumb") is null);
+
+        Check("the director is written as Kodi spells it",
+            doc.Element("director")?.Value == "Tony Scott");
+
+        Check("and the writer, which Kodi calls credits",
+            doc.Element("credits")?.Value == "Richard Kelly");
+
+        Check("both genres, one element each",
+            doc.Elements("genre").Select(g => g.Value).SequenceEqual(["Action", "Crime"]));
+
+        Check("the studio and the country",
+            doc.Element("studio")?.Value == "New Line Cinema"
+            && doc.Element("country")?.Value == "United States of America");
+
+        Check("the certificate, unaveraged", doc.Element("mpaa")?.Value == "R");
+
+        Check("the runtime and the tagline",
+            doc.Element("runtime")?.Value == "127"
+            && doc.Element("tagline")?.Value == "Heads you live.");
+
+        // The modern ratings block, not a bare number: a library can hold
+        // scores from several sources and an unattributed one cannot be updated.
+        var rating = doc.Element("ratings")?.Element("rating");
+
+        Check("the rating is named and attributed",
+            rating?.Attribute("name")?.Value == "themoviedb"
+            && rating.Attribute("default")?.Value == "true"
+            && rating.Attribute("max")?.Value == "10");
+
+        Check("with its value and the weight behind it",
+            rating?.Element("value")?.Value == "6.2"
+            && rating.Element("votes")?.Value == "941");
+
+        // The one that would embarrass: a decimal point written the German way
+        // is not a number Kodi can read.
+        Check("the value is written invariant, whatever the machine's locale",
+            !rating!.Element("value")!.Value.Contains(','));
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== a series writes its regulars, an episode only its guests ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-nfotv-{Guid.NewGuid():N}");
+    var showDir = Path.Combine(root, "Reacher (2022)");
+    Directory.CreateDirectory(showDir);
+
+    try
+    {
+        var show = new TvShow
+        {
+            Id = "9",
+            Name = "Reacher",
+            FirstAired = "2022-02-04",
+            Network = "Prime Video",
+            Status = "Returning Series",
+            Certification = "TV-MA",
+            RuntimeMinutes = 50,
+            Rating = new Rating { Source = "themoviedb", Value = 8.1, Votes = 2200 },
+            Genres = ["Crime", "Drama"],
+            Studios = ["Prime Video", "Skydance Television"],
+            Creators = [new Person { Name = "Nick Santora" }],
+            Cast = [new Person { Name = "Alan Ritchson", Role = "Jack Reacher", Order = 0 }],
+            Seasons =
+            [
+                new Season
+                {
+                    Number = 4,
+                    Episodes = [new Episode { SeasonNumber = 4, Number = 6, Name = "Plum Out of Luck" }]
+                }
+            ]
+        };
+
+        var written = NfoWriter.WriteShow(showDir, show, new PyreMediaSettings { WriteNfoFiles = true });
+        var doc = System.Xml.Linq.XDocument.Load(written.Path).Root!;
+
+        Check("the series carries its regular cast",
+            doc.Elements("actor").Single().Element("name")?.Value == "Alan Ritchson");
+
+        Check("its status, certificate and runtime",
+            doc.Element("status")?.Value == "Returning Series"
+            && doc.Element("mpaa")?.Value == "TV-MA"
+            && doc.Element("runtime")?.Value == "50");
+
+        Check("the creator", doc.Element("credits")?.Value == "Nick Santora");
+
+        // The network is already the first studio. Writing it twice would have
+        // Kodi list the same company against itself.
+        Check("the network is not written twice as a studio",
+            doc.Elements("studio").Select(x => x.Value).SequenceEqual(
+                ["Prime Video", "Skydance Television"]));
+
+        var file = Path.Combine(showDir, "Reacher 04x06.mkv");
+        File.WriteAllText(file, "x");
+
+        var episode = new Episode
+        {
+            SeasonNumber = 4,
+            Number = 6,
+            Name = "Plum Out of Luck",
+            RuntimeMinutes = 48,
+            Rating = new Rating { Source = "themoviedb", Value = 7.9, Votes = 44 },
+            Directors = [new Person { Name = "Sam Hill" }],
+            Writers = [new Person { Name = "Cait Duffy" }],
+            GuestStars = [new Person { Name = "Someone Else", Role = "Barman", Order = 0 }]
+        };
+
+        var epResult = NfoWriter.WriteEpisode(file, show, episode, null,
+            new PyreMediaSettings { WriteNfoFiles = true });
+
+        var ep = System.Xml.Linq.XDocument.Load(epResult.Path).Root!;
+
+        Check("the episode carries its own director and writer",
+            ep.Element("director")?.Value == "Sam Hill"
+            && ep.Element("credits")?.Value == "Cait Duffy");
+
+        Check("its own rating, which is not the series' rating",
+            ep.Element("ratings")?.Element("rating")?.Element("value")?.Value == "7.9");
+
+        // The whole point of keeping them apart: fifty episodes each repeating
+        // the series cast is three times the metadata to say nothing new.
+        Check("the guest is written",
+            ep.Elements("actor").Single().Element("name")?.Value == "Someone Else");
+
+        Check("and the series regulars are not repeated into it",
+            !ep.Elements("actor").Any(a => a.Element("name")?.Value == "Alan Ritchson"));
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== an .nfo that predates the cast gains it without losing anything ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-fill-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var film = Path.Combine(root, "Domino (2005).mkv");
+        File.WriteAllText(film, "x");
+
+        // What is actually on this shelf: an .nfo another program wrote, with
+        // no cast, no genres and no ratings block - but with watch state, a
+        // hand-added tag, artwork paths and a legacy rating that nothing here
+        // is entitled to throw away.
+        var nfo = Path.Combine(root, "Domino (2005).nfo");
+
+        File.WriteAllText(nfo,
+            """
+            <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+            <movie>
+              <title>Domino</title>
+              <plot>An older plot, written by something else.</plot>
+              <rating>6.46</rating>
+              <playcount>3</playcount>
+              <lastplayed>2026-01-02 20:00:00</lastplayed>
+              <userrating>9</userrating>
+              <tag>Saturday night</tag>
+              <art><poster>I:\Films\Domino\poster.jpg</poster></art>
+            </movie>
+            """);
+
+        var movie = new Movie
+        {
+            TmdbId = "9923",
+            Title = "Domino",
+            Overview = "The story of Domino Harvey.",
+            ReleaseDate = "2005-10-14",
+            Certification = "R",
+            Rating = new Rating { Source = "themoviedb", Value = 5.9, Votes = 1309 },
+            Genres = ["Action", "Crime"],
+            Directors = [new Person { Name = "Tony Scott" }],
+            Cast = [new Person { Name = "Keira Knightley", Role = "Domino Harvey", Order = 0 }]
+        };
+
+        // The settings actually in use: preserve what is there, and merge.
+        var settings = new PyreMediaSettings
+        {
+            WriteNfoFiles = true, PreserveExistingNfo = true, MergeExistingNfo = true
+        };
+
+        var result = NfoWriter.WriteMovie(film, movie, null, settings);
+        var doc = System.Xml.Linq.XDocument.Load(nfo).Root!;
+
+        Check("the file is rewritten rather than skipped",
+            result.Outcome == NfoWriter.Outcome.Written);
+
+        // The point of the exercise.
+        Check("the cast it never had is filled in",
+            doc.Elements("actor").Single().Element("name")?.Value == "Keira Knightley");
+
+        Check("so are the genres, the director and the certificate",
+            doc.Elements("genre").Count() == 2
+            && doc.Element("director")?.Value == "Tony Scott"
+            && doc.Element("mpaa")?.Value == "R");
+
+        Check("and the ratings block",
+            doc.Element("ratings")?.Element("rating")?.Element("value")?.Value == "5.9");
+
+        // The half that matters more. None of this can be reproduced, so none
+        // of it may be lost to fill in a gap.
+        Check("watch state survives untouched",
+            doc.Element("playcount")?.Value == "3"
+            && doc.Element("lastplayed")?.Value == "2026-01-02 20:00:00");
+
+        Check("so does the rating the person set themselves",
+            doc.Element("userrating")?.Value == "9");
+
+        Check("and a hand-added tag, and artwork this program never wrote",
+            doc.Element("tag")?.Value == "Saturday night"
+            && doc.Element("art")?.Element("poster")?.Value == @"I:\Films\Domino\poster.jpg");
+
+        // Fresh beats stale where both have an opinion - that is the point of
+        // rewriting at all.
+        Check("the fresher plot wins over the older one",
+            doc.Element("plot")?.Value == "The story of Domino Harvey.");
+
+        // Nothing here writes a legacy <rating>, so the old one is not ours to
+        // remove. It stays, and Kodi v17+ reads <ratings> in preference.
+        Check("the legacy rating element is left where it was",
+            doc.Element("rating")?.Value == "6.46");
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== the backfill fetches once per series, not once per episode ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-run-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        for (var e = 1; e <= 6; e++)
+        {
+            File.WriteAllText(Path.Combine(root, $"Show 01x{e:00}.mkv"), "x");
+            File.WriteAllText(Path.Combine(root, $"Show 01x{e:00}.nfo"),
+                $"<episodedetails><title>E{e}</title><season>1</season><episode>{e}</episode>"
+                + "<tvdbid>371572</tvdbid></episodedetails>");
+        }
+
+        var survey = Backfill.Survey([root], new PyreMediaSettings(), isTv: true);
+
+        Check("all six are ready to fetch", survey.Ready.Count == 6);
+
+        var showCalls = 0;
+        var resolveCalls = 0;
+
+        var show = new TvShow
+        {
+            Id = "371572",
+            Name = "Show",
+            Rating = new Rating { Source = "themoviedb", Value = 8.0, Votes = 100 },
+            Genres = ["Drama"],
+            Cast = [new Person { Name = "A Regular", Order = 0 }],
+            Seasons =
+            [
+                new Season
+                {
+                    Number = 1,
+                    Episodes = [.. Enumerable.Range(1, 6).Select(n => new Episode
+                    {
+                        SeasonNumber = 1, Number = n, Name = $"Episode {n}",
+                        Directors = [new Person { Name = "A Director" }]
+                    })]
+                }
+            ]
+        };
+
+        var runner = new BackfillRunner(
+            movieById: (_, _) => Task.FromResult<Movie?>(null),
+            showById: (_, _, _) => { showCalls++; return Task.FromResult<TvShow?>(show); },
+            resolveExternalId: (_, _, _, _) => { resolveCalls++; return Task.FromResult<string?>("1234"); },
+            probe: (_, _) => Task.FromResult<MediaInfo?>(null),
+            settings: new PyreMediaSettings
+            {
+                WriteNfoFiles = true, PreserveExistingNfo = true, MergeExistingNfo = true
+            });
+
+        var result = await runner.RunAsync(survey.Ready);
+
+        Check("every episode is filled in", result.Filled == 6 && result.Failed == 0);
+
+        // The whole reason for the cache. Six episodes naming one series is one
+        // series to fetch, and fetching a show costs a request per season - so
+        // without this a single season is how an unattended sweep gets an API
+        // key rate-limited.
+        Check("the series was fetched once, not six times", showCalls == 1);
+
+        Check("and its id resolved once, not six times", resolveCalls == 1);
+
+        var one = System.Xml.Linq.XDocument.Load(Path.Combine(root, "Show 01x03.nfo")).Root!;
+
+        Check("the episode gained its director",
+            one.Element("director")?.Value == "A Director");
+
+        Check("and the title the provider gave it",
+            one.Element("title")?.Value == "Episode 3");
+
+        // The id it was found by is still there afterwards, so a second pass
+        // finds it the same way.
+        Check("the id it was matched on survives the rewrite",
+            one.Element("tvdbid")?.Value == "371572");
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== a file that already states its tracks is not probed again ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-probe-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        void Film(string name, string extra)
+        {
+            File.WriteAllText(Path.Combine(root, name + ".mkv"), "x");
+            File.WriteAllText(Path.Combine(root, name + ".nfo"),
+                $"<movie><title>{name}</title><tmdbid>550</tmdbid>{extra}</movie>");
+        }
+
+        // The ordinary case on a real shelf: everything about the file is
+        // already recorded, and only the people are missing.
+        Film("Stated",
+            "<fileinfo><streamdetails><video><codec>hevc</codec></video></streamdetails></fileinfo>");
+
+        // The exception: nothing has ever read this file.
+        Film("Silent", "");
+
+        var survey = Backfill.Survey([root], new PyreMediaSettings(), isTv: false);
+
+        var probed = new List<string>();
+
+        var runner = new BackfillRunner(
+            movieById: (id, _) => Task.FromResult<Movie?>(new Movie
+            {
+                TmdbId = id, Title = "A Film",
+                Cast = [new Person { Name = "Someone", Order = 0 }]
+            }),
+            showById: (_, _, _) => Task.FromResult<TvShow?>(null),
+            resolveExternalId: (_, _, _, _) => Task.FromResult<string?>(null),
+            probe: (path, _) =>
+            {
+                probed.Add(Path.GetFileNameWithoutExtension(path));
+                return Task.FromResult<MediaInfo?>(null);
+            },
+            settings: new PyreMediaSettings
+            {
+                WriteNfoFiles = true, PreserveExistingNfo = true, MergeExistingNfo = true
+            });
+
+        var result = await runner.RunAsync(survey.Ready);
+
+        Check("both are filled in", result.Filled == 2);
+
+        // 39,276 files were ready on the real library and all but a few hundred
+        // already carried their tracks. Probing them all would have been hours
+        // of ffprobe to re-learn what the file already said.
+        Check("only the one that never stated its tracks is probed",
+            probed.SequenceEqual(["Silent"]));
+
+        Check("and the one that did keeps the block it had",
+            System.Xml.Linq.XDocument.Load(Path.Combine(root, "Stated.nfo"))
+                .Root!.Element("fileinfo")?.Element("streamdetails")?
+                .Element("video")?.Element("codec")?.Value == "hevc");
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== one title that cannot be fetched does not sink the sweep ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-run2-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        foreach (var name in new[] { "Good (2001)", "Angry (2002)", "Missing (2003)" })
+        {
+            File.WriteAllText(Path.Combine(root, name + ".mkv"), "x");
+            File.WriteAllText(Path.Combine(root, name + ".nfo"),
+                $"<movie><title>{name[..^7]}</title><tmdbid>{name.Length}</tmdbid></movie>");
+        }
+
+        var survey = Backfill.Survey([root], new PyreMediaSettings(), isTv: false);
+
+        var runner = new BackfillRunner(
+            movieById: (id, _) => id switch
+            {
+                // The provider is down for this one.
+                "12" => throw new InvalidOperationException("TMDb returned HTTP 503"),
+
+                // And simply has no such title for this one.
+                "14" => Task.FromResult<Movie?>(null),
+
+                _ => Task.FromResult<Movie?>(new Movie
+                {
+                    TmdbId = id, Title = "Good", Overview = "A plot.",
+                    Genres = ["Drama"], Cast = [new Person { Name = "Someone", Order = 0 }]
+                })
+            },
+            showById: (_, _, _) => Task.FromResult<TvShow?>(null),
+            resolveExternalId: (_, _, _, _) => Task.FromResult<string?>(null),
+            probe: (_, _) => Task.FromResult<MediaInfo?>(null),
+            settings: new PyreMediaSettings
+            {
+                WriteNfoFiles = true, PreserveExistingNfo = true, MergeExistingNfo = true
+            });
+
+        var result = await runner.RunAsync(survey.Ready);
+
+        Check("the one that worked is written", result.Filled == 1);
+
+        Check("the thrown one is counted as a failure, not a silent skip",
+            result.Failed == 1 && result.Trouble.Any(t => t.Detail.Contains("503")));
+
+        Check("and the one TMDb has never heard of says so in words",
+            result.Trouble.Any(t => t.Detail.Contains("no film")));
+
+        Check("the good one really did gain a cast",
+            System.Xml.Linq.XDocument.Load(Path.Combine(root, "Good (2001).nfo"))
+                .Root!.Elements("actor").Any());
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== a backfill only touches what names itself ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-back-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        void Film(string name, string nfo)
+        {
+            File.WriteAllText(Path.Combine(root, name + ".mkv"), "x");
+            File.WriteAllText(Path.Combine(root, name + ".nfo"), nfo);
+        }
+
+        // Kodi's spelling.
+        Film("Modern (2020)",
+            """<movie><title>Modern</title><uniqueid type="tmdb">550</uniqueid></movie>""");
+
+        // What this shelf actually holds: Emby's, and older Kodi's. Of 57 real
+        // files sampled, the ones carrying an id carried it like this.
+        Film("Legacy (2019)",
+            """<movie><title>Legacy</title><imdbid>tt0137523</imdbid><tvdbid>371572</tvdbid></movie>""");
+
+        // No id, and short of things - the case that must be reported rather
+        // than matched on a name that might belong to something else.
+        Film("Nameless (2018)", "<movie><title>Nameless</title></movie>");
+
+        // Emby writes an empty element on titles it never matched. Asking a
+        // provider for title "" is a request that can only fail.
+        Film("Hollow (2017)", """<movie><title>Hollow</title><tmdbid /></movie>""");
+
+        // Already complete, so nothing to do and nothing to report.
+        Film("Finished (2016)",
+            """
+            <movie><title>Finished</title><plot>A plot.</plot><mpaa>15</mpaa>
+              <rating>7.1</rating><genre>Drama</genre><director>Someone</director>
+              <actor><name>An Actor</name></actor>
+              <fileinfo><streamdetails><video><codec>hevc</codec></video></streamdetails></fileinfo>
+            </movie>
+            """);
+
+        // A video with no .nfo at all. A rename writes one; it is not this
+        // sweep's job and counting it as a gap would overstate the work.
+        File.WriteAllText(Path.Combine(root, "Bare (2015).mkv"), "x");
+
+        var survey = Backfill.Survey([root], new PyreMediaSettings(), isTv: false);
+
+        Check("every video is accounted for", survey.Total == 6);
+
+        Check("the complete one is counted and left alone", survey.Complete == 1);
+
+        Check("the one with no .nfo is counted separately", survey.NoNfo == 1);
+
+        Check("both id spellings are ready to fetch",
+            survey.Ready.Select(r => Path.GetFileNameWithoutExtension(r.VideoPath))
+                  .OrderBy(x => x).SequenceEqual(["Legacy (2019)", "Modern (2020)"]));
+
+        Check("an empty id counts as no id, not as a title called nothing",
+            survey.Unmatched.Any(u => u.Name.StartsWith("Hollow")));
+
+        Check("and the one with nothing to go on is reported, not guessed at",
+            survey.Unmatched.Count == 2
+            && survey.Unmatched.Any(u => u.Name.StartsWith("Nameless")));
+
+        var legacy = survey.Ready.Single(r => r.Name.StartsWith("Legacy"));
+
+        Check("the legacy ids are read for what they are",
+            legacy.Ids.ImdbId == "tt0137523" && legacy.Ids.TvdbId == "371572"
+            && legacy.Ids.TmdbId is null);
+
+        Check("and the gaps are named in words somebody can read first",
+            legacy.Gaps.Summary.Contains("cast") && legacy.Gaps.Summary.Contains("rating"));
+
+        // A legacy <rating> is a rating. A library that has one is not missing
+        // one just because it predates the <ratings> block.
+        Check("an old-style rating counts as having one",
+            NfoGaps.Of(System.Xml.Linq.XElement.Parse("<movie><rating>7.1</rating></movie>")).Rating == false);
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== an episode needs its numbers as well as its series ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-backtv-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        void Ep(string name, string nfo)
+        {
+            File.WriteAllText(Path.Combine(root, name + ".mkv"), "x");
+            File.WriteAllText(Path.Combine(root, name + ".nfo"), nfo);
+        }
+
+        Ep("Show 01x02",
+            """<episodedetails><title>Two</title><season>1</season><episode>2</episode><uniqueid type="tvdb">371572</uniqueid></episodedetails>""");
+
+        // The series id says which series, not which episode. Filling this one
+        // from whatever came back would be worse than leaving it alone.
+        Ep("Show unnumbered",
+            """<episodedetails><title>?</title><uniqueid type="tvdb">371572</uniqueid></episodedetails>""");
+
+        var survey = Backfill.Survey([root], new PyreMediaSettings(), isTv: true);
+
+        Check("the numbered episode can be looked up",
+            survey.Ready.Single().Season == 1 && survey.Ready.Single().Episode == 2);
+
+        Check("the unnumbered one is left for a person, series id or not",
+            survey.Unmatched.Single().Name.StartsWith("Show unnumbered"));
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== a Screens folder is litter however many grabs are in it ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-screens-{Guid.NewGuid():N}");
+
+    try
+    {
+        // The real shape, from H:\Done. Four 6 MB PNGs in a folder called
+        // Screens, beside an episode that had already been filed away.
+        var release = Path.Combine(root, "Reacher.S04E06.1080p.x265-ELiTE");
+        var screens = Path.Combine(release, "Screens");
+        var comic = Path.Combine(root, "Andromeda Strain (Dell 1969)");
+
+        Directory.CreateDirectory(screens);
+        Directory.CreateDirectory(comic);
+
+        // Five, not four. The guard that skipped a folder of nothing but
+        // pictures fired at more than four, so the sweep worked on a release
+        // with four grabs and silently gave up on one with five.
+        for (var i = 1; i <= 5; i++)
+            File.WriteAllText(Path.Combine(screens,
+                $"Reacher.S04E06.1080p.x265-ELiTE.Screen{i:0000}.png"), "x");
+
+        for (var i = 1; i <= 12; i++)
+            File.WriteAllText(Path.Combine(comic, $"page{i:000}.jpg"), "x");
+
+        var found = SceneImages.Find([root]);
+
+        Check("five grabs in a folder called Screens are all found",
+            found.Count(f => f.Path.Contains("Screen")) == 5);
+
+        Check("named for the folder, which is what said so",
+            found.All(f => !f.Path.Contains("Screen") || f.Because.Contains("folder called Screens")));
+
+        // The reason the guard exists in the first place, still doing its job.
+        Check("a comic kept as loose pages is still left entirely alone",
+            !found.Any(f => f.Path.Contains("Andromeda")));
+
+        Check("so the sweep finds five things, not seventeen", found.Count == 5);
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== the grabs are offered while renaming, not only by Tidy ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-grab-{Guid.NewGuid():N}");
+
+    try
+    {
+        var screens = Path.Combine(root, "Screens");
+        Directory.CreateDirectory(screens);
+
+        var episode = Path.Combine(root, "Reacher.S04E06.1080p.x265-ELiTE.mkv");
+        File.WriteAllText(episode, new string('x', 20000));
+
+        var grab = Path.Combine(screens, "Reacher.S04E06.1080p.x265-ELiTE.Screen0001.png");
+        File.WriteAllText(grab, "x");
+
+        // The artwork this program writes itself, in the same sweep. Losing
+        // this to a rule about images would be far worse than the clutter.
+        var poster = Path.Combine(root, "Reacher.S04E06.1080p.x265-ELiTE-poster.jpg");
+        File.WriteAllText(poster, "x");
+
+        var show = new TvShow
+        {
+            Id = "1",
+            Name = "Reacher",
+            FirstAired = "2022-01-01",
+            Seasons =
+            [
+                new Season
+                {
+                    Number = 4,
+                    Episodes = [new Episode { SeasonNumber = 4, Number = 6, Name = "Plum Out of Luck" }]
+                }
+            ]
+        };
+
+        MediaItem Reacher() => new()
+        {
+            Path = root,
+            DisplayName = "Reacher.S04E06.1080p.x265-ELiTE",
+            Kind = MediaKind.TvEpisode,
+            Files = [episode],
+            SearchTitle = "Reacher",
+            SearchYear = "2022",
+            MainFile = episode
+        };
+
+        var plan = new MediaPlanner(new PyreMediaSettings { DeleteJunkFiles = true })
+            .PlanTv(Reacher(), show);
+
+        var row = plan.Actions.FirstOrDefault(a =>
+            string.Equals(a.SourcePath, grab, StringComparison.OrdinalIgnoreCase));
+
+        Check("the screen grab gets a row while the episode is being renamed",
+            row is not null && row.Status == PlanStatus.Delete);
+
+        Check("which says why, in words you can check against the file",
+            row?.DeleteReason?.Contains("folder called Screens") == true);
+
+        Check("and it is ticked, so Apply actually removes it",
+            row?.StartsSelected == true);
+
+        Check("the poster this program wrote is not offered",
+            !plan.Actions.Any(a => string.Equals(a.SourcePath, poster, StringComparison.OrdinalIgnoreCase)));
+
+        Check("the episode beside it is still renamed",
+            plan.Actions.Any(a => string.Equals(a.SourcePath, episode, StringComparison.OrdinalIgnoreCase)
+                                  && a.Status == PlanStatus.Change));
+
+        // Off means off, for this as much as for the .nfo beside it.
+        var quiet = new MediaPlanner(new PyreMediaSettings { DeleteJunkFiles = false })
+            .PlanTv(Reacher(), show);
+
+        Check("with junk deletion switched off no grab is offered",
+            !quiet.Actions.Any(a => a.Status == PlanStatus.Delete
+                                    && string.Equals(a.SourcePath, grab, StringComparison.OrdinalIgnoreCase)));
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
 Console.WriteLine("\n=== what the shelf sweep refuses to touch ===");
 {
     var root = Path.Combine(Path.GetTempPath(), "pyremedia-junk-" + Guid.NewGuid().ToString("N")[..8]);

@@ -108,15 +108,20 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
 
     public async Task<Movie?> GetMovieAsync(string tmdbId, string language, CancellationToken ct = default)
     {
+        // append_to_response, not three more round trips. TMDb returns the
+        // credits and the certificate inside the reply it was already sending,
+        // so a full cast costs one request rather than three.
         using var doc = await GetJsonAsync(
             $"{BaseUrl}/movie/{Uri.EscapeDataString(tmdbId)}?api_key={apiKey}"
-            + $"&language={Uri.EscapeDataString(language)}", ct).ConfigureAwait(false);
+            + $"&language={Uri.EscapeDataString(language)}"
+            + "&append_to_response=credits,release_dates", ct).ConfigureAwait(false);
 
         if (doc is null)
             return null;
 
         var root = doc.RootElement;
         var release = Str(root, "release_date");
+        var credits = root.TryGetProperty("credits", out var cr) ? cr : default;
 
         return new Movie
         {
@@ -125,8 +130,59 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
             Title = Str(root, "title"),
             Overview = Str(root, "overview"),
             ReleaseDate = release,
-            Year = release.Length >= 4 ? release[..4] : null
+            Year = release.Length >= 4 ? release[..4] : null,
+
+            Tagline = Blank(Str(root, "tagline")),
+            RuntimeMinutes = Int(root, "runtime"),
+            Certification = Certificate(root, "release_dates", "release_dates", "certification"),
+            Rating = ScoreOf(root, "themoviedb"),
+
+            Genres = Names(root, "genres"),
+            Studios = Names(root, "production_companies"),
+            Countries = Names(root, "production_countries"),
+
+            Cast = CastOf(credits),
+            Directors = CrewOf(credits, DirectorJobs),
+            Writers = CrewOf(credits, WriterJobs)
         };
+    }
+
+    /// <summary>
+    /// The TMDb id for a title known only by somebody else's id.
+    ///
+    /// Half a real library names its titles with an IMDb or TheTVDB id and no
+    /// TMDb one - written by Emby, or by a Kodi old enough to predate
+    /// uniqueid. Without this, those files can only be matched by name, which
+    /// is the guessing an unattended pass must not do.
+    /// </summary>
+    /// <param name="source">"imdb_id" or "tvdb_id", as TMDb spells them.</param>
+    public async Task<string?> FindByExternalIdAsync(
+        string externalId, string source, bool isTv, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(externalId)) return null;
+
+        using var doc = await GetJsonAsync(
+            $"{BaseUrl}/find/{Uri.EscapeDataString(externalId)}?api_key={apiKey}"
+            + $"&external_source={Uri.EscapeDataString(source)}", ct).ConfigureAwait(false);
+
+        if (doc is null) return null;
+
+        var bucket = isTv ? "tv_results" : "movie_results";
+
+        if (!doc.RootElement.TryGetProperty(bucket, out var arr)
+            || arr.ValueKind != JsonValueKind.Array)
+            return null;
+
+        // One hit or none. Two titles sharing an external id would mean the
+        // other source had merged something, and picking between them here
+        // would be the guess this exists to avoid.
+        var hits = arr.EnumerateArray().ToList();
+
+        if (hits.Count != 1) return null;
+
+        return hits[0].TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number
+            ? id.GetInt32().ToString()
+            : null;
     }
 
     // ---------------- Shared ----------------
@@ -153,8 +209,13 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
         if (string.IsNullOrEmpty(show.TmdbId))
             return null;
 
+        // aggregate_credits rather than credits: on a long-running series the
+        // plain endpoint returns whoever happened to be in the first season,
+        // while this one is the cast of the show as a whole, with every
+        // character each actor has played folded into one entry.
         using var detail = await GetJsonAsync(
-            $"{BaseUrl}/tv/{show.TmdbId}?api_key={apiKey}&language={Uri.EscapeDataString(language)}", ct)
+            $"{BaseUrl}/tv/{show.TmdbId}?api_key={apiKey}&language={Uri.EscapeDataString(language)}"
+            + "&append_to_response=aggregate_credits,content_ratings", ct)
             .ConfigureAwait(false);
 
         if (detail is null)
@@ -176,7 +237,24 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
             FirstAired = Str(root, "first_air_date"),
             Network = root.TryGetProperty("networks", out var nets)
                       && nets.EnumerateArray().FirstOrDefault() is { ValueKind: JsonValueKind.Object } n
-                          ? Str(n, "name") : null
+                          ? Str(n, "name") : null,
+
+            Status = Blank(Str(root, "status")),
+            Certification = Certificate(root, "content_ratings", null, "rating"),
+            Rating = ScoreOf(root, "themoviedb"),
+
+            // A series states a list of typical lengths - a half-hour show that
+            // once ran a double episode has both. The first is the usual one.
+            RuntimeMinutes = root.TryGetProperty("episode_run_time", out var rts)
+                             && rts.ValueKind == JsonValueKind.Array
+                             && rts.EnumerateArray().FirstOrDefault() is { ValueKind: JsonValueKind.Number } first
+                ? first.GetInt32() : null,
+
+            Genres = Names(root, "genres"),
+            Studios = Names(root, "networks"),
+            Creators = Names(root, "created_by").Select(c => new Person { Name = c }).ToList(),
+
+            Cast = AggregateCast(root)
         };
 
         foreach (var sn in seasonNumbers)
@@ -223,7 +301,15 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
                     // there.
                     StillUrl = Still(e),
 
-                    Source = "TMDb"
+                    Source = "TMDb",
+
+                    // Both already in this reply. The season endpoint carries a
+                    // crew and a guest list per episode, so the director of one
+                    // episode costs nothing beyond reading the field.
+                    GuestStars = CastList(e, "guest_stars"),
+                    Directors = CrewIn(e, DirectorJobs),
+                    Writers = CrewIn(e, WriterJobs),
+                    Rating = ScoreOf(e, "themoviedb")
                 });
             }
 
@@ -349,6 +435,170 @@ public sealed class TmdbProvider(HttpClient http, string apiKey) : IShowSearchPr
             throw new MetadataException($"TMDb request failed: {ex.Message}", ex);
         }
     }
+
+    /// <summary>Jobs that mean "directed it", as TMDb spells them.</summary>
+    private static readonly string[] DirectorJobs = ["Director"];
+
+    /// <summary>
+    /// Jobs that mean "wrote it". Kodi has one field for all of them, and a
+    /// screenplay credit is a writing credit by any reading.
+    /// </summary>
+    private static readonly string[] WriterJobs = ["Writer", "Screenplay", "Story", "Teleplay"];
+
+    /// <summary>Profile shots, at a size worth caching beside a library.</summary>
+    private const string ProfileBase = "https://image.tmdb.org/t/p/w185";
+
+    private static string? Blank(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    private static int? Int(JsonElement el, string prop) =>
+        el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetInt32() : null;
+
+    /// <summary>Every "name" in an array of objects - genres, networks, countries.</summary>
+    private static List<string> Names(JsonElement root, string prop)
+    {
+        if (!root.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return [.. arr.EnumerateArray()
+            .Select(x => Str(x, "name"))
+            .Where(n => !string.IsNullOrWhiteSpace(n))];
+    }
+
+    /// <summary>
+    /// The score, where enough people have voted to make it one.
+    ///
+    /// A single vote is not a rating, it is somebody's opinion, and writing 10.0
+    /// into a library on the strength of one is worse than writing nothing -
+    /// nothing at least leaves Kodi's own sorting alone.
+    /// </summary>
+    private static Rating? ScoreOf(JsonElement root, string source)
+    {
+        if (!root.TryGetProperty("vote_average", out var v) || v.ValueKind != JsonValueKind.Number)
+            return null;
+
+        var value = v.GetDouble();
+        var votes = Int(root, "vote_count") ?? 0;
+
+        if (value <= 0 || votes < 2) return null;
+
+        return new Rating { Source = source, Value = value, Votes = votes };
+    }
+
+    /// <summary>
+    /// A certificate from the viewer's own country, falling back to the US and
+    /// then to whatever exists.
+    ///
+    /// Never averaged and never merged: a rating is a legal judgement made
+    /// somewhere specific, and a film rated 12 in one country and R in another
+    /// has not been rated "12/R" by anybody.
+    /// </summary>
+    private static string? Certificate(JsonElement root, string block, string? inner, string field)
+    {
+        if (!root.TryGetProperty(block, out var b)
+            || !b.TryGetProperty("results", out var results)
+            || results.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var entries = results.EnumerateArray().ToList();
+
+        var preferred = System.Globalization.RegionInfo.CurrentRegion.TwoLetterISORegionName;
+
+        foreach (var country in new[] { preferred, "US" }.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var hit = entries.FirstOrDefault(e =>
+                string.Equals(Str(e, "iso_3166_1"), country, StringComparison.OrdinalIgnoreCase));
+
+            if (hit.ValueKind != JsonValueKind.Object) continue;
+
+            if (Pick(hit) is { } found) return found;
+        }
+
+        foreach (var e in entries)
+            if (Pick(e) is { } found) return found;
+
+        return null;
+
+        string? Pick(JsonElement entry)
+        {
+            if (inner is null) return Blank(Str(entry, field));
+
+            if (!entry.TryGetProperty(inner, out var list) || list.ValueKind != JsonValueKind.Array)
+                return null;
+
+            return list.EnumerateArray()
+                       .Select(r => Str(r, field))
+                       .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+        }
+    }
+
+    private static Person Actor(JsonElement p, string? role, int? order) => new()
+    {
+        Name = Str(p, "name"),
+        Role = Blank(role ?? string.Empty),
+        Order = order,
+        ThumbUrl = Str(p, "profile_path") is { Length: > 0 } path ? ProfileBase + path : null
+    };
+
+    /// <summary>A plain cast array - a film's, or an episode's guest list.</summary>
+    private static List<Person> CastList(JsonElement root, string prop)
+    {
+        if (!root.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return [.. arr.EnumerateArray()
+            .Where(c => !string.IsNullOrWhiteSpace(Str(c, "name")))
+            .Select(c => Actor(c, Str(c, "character"), Int(c, "order")))];
+    }
+
+    private static List<Person> CastOf(JsonElement credits) =>
+        credits.ValueKind == JsonValueKind.Object ? CastList(credits, "cast") : [];
+
+    /// <summary>
+    /// The cast of a whole series. Each entry carries every character that actor
+    /// has played, which for a long run is the honest answer - one actor, three
+    /// roles - so they are joined rather than one being picked.
+    /// </summary>
+    private static List<Person> AggregateCast(JsonElement root)
+    {
+        if (!root.TryGetProperty("aggregate_credits", out var credits)
+            || !credits.TryGetProperty("cast", out var arr)
+            || arr.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var people = new List<Person>();
+
+        foreach (var c in arr.EnumerateArray())
+        {
+            if (string.IsNullOrWhiteSpace(Str(c, "name"))) continue;
+
+            var roles = c.TryGetProperty("roles", out var rs) && rs.ValueKind == JsonValueKind.Array
+                ? rs.EnumerateArray().Select(r => Str(r, "character"))
+                    .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList()
+                : [];
+
+            people.Add(Actor(c, string.Join(" / ", roles), Int(c, "order")));
+        }
+
+        return people;
+    }
+
+    private static List<Person> CrewIn(JsonElement root, string[] jobs)
+    {
+        if (!root.TryGetProperty("crew", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return [];
+
+        // Distinct by name: somebody credited as both Writer and Story is one
+        // person who wrote it, not two.
+        return [.. arr.EnumerateArray()
+            .Where(c => jobs.Contains(Str(c, "job"), StringComparer.OrdinalIgnoreCase))
+            .Where(c => !string.IsNullOrWhiteSpace(Str(c, "name")))
+            .GroupBy(c => Str(c, "name"), StringComparer.OrdinalIgnoreCase)
+            .Select(g => Actor(g.First(), Str(g.First(), "job"), null))];
+    }
+
+    private static List<Person> CrewOf(JsonElement credits, string[] jobs) =>
+        credits.ValueKind == JsonValueKind.Object ? CrewIn(credits, jobs) : [];
 
     private static string Str(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String

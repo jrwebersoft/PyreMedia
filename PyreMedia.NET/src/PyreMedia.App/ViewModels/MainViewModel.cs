@@ -1923,6 +1923,78 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// What an unattended backfill could do, without writing anything.
+    ///
+    /// Separated from the run so the caller can put real numbers in front of
+    /// somebody before asking. Nothing here guesses: a file is only ready if
+    /// its own .nfo names the title.
+    /// </summary>
+    public BackfillSurvey SurveyGaps(CancellationToken ct = default)
+    {
+        var tv = Backfill.Survey(_settings.TvFolders, _settings, isTv: true, ct);
+        var film = Backfill.Survey(_settings.MovieFolders, _settings, isTv: false, ct);
+
+        return new BackfillSurvey
+        {
+            Ready = [.. tv.Ready, .. film.Ready],
+            Unmatched = [.. tv.Unmatched, .. film.Unmatched],
+            Complete = tv.Complete + film.Complete,
+            NoNfo = tv.NoNfo + film.NoNfo
+        };
+    }
+
+    /// <summary>
+    /// Fill in what the existing .nfo files are missing, looking every title up
+    /// by the id it already carries.
+    /// </summary>
+    public async Task FillGapsAsync(IReadOnlyList<BackfillTarget> targets, CancellationToken ct = default)
+    {
+        if (targets.Count == 0) return;
+
+        IsBusy = true;
+
+        try
+        {
+            var probe = new MediaProbe(_settings.FfprobePath);
+
+            var runner = new BackfillRunner(
+                movieById: (id, c) => _metadata.GetMovieAsync(id, c),
+                showById: (tmdbId, tvdbId, c) => _metadata.GetShowByIdsAsync(tmdbId, tvdbId, null, c),
+                resolveExternalId: (id, source, isTv, c) => _metadata.FindTmdbIdAsync(id, source, isTv, c),
+                probe: (path, c) => probe.ProbeAsync(path, c),
+                settings: _settings);
+
+            var log = new Progress<string>(WriteLog);
+            var done = new Progress<int>(n =>
+                StatusText = $"Filling in gaps... {n}/{targets.Count}");
+
+            var result = await runner.RunAsync(targets, log, done, ct);
+
+            StatusText = "Done";
+
+            var msg = $"Filled in {result.Filled} of {targets.Count} file(s)"
+                      + (result.Unchanged > 0 ? $", {result.Unchanged} unchanged" : "")
+                      + (result.Failed > 0 ? $", {result.Failed} failed" : "") + ".";
+
+            SetBanner(msg, result.Failed > 0);
+            WriteLog(msg);
+        }
+        catch (OperationCanceledException)
+        {
+            SetBanner("Stopped. The files already written are written.", false);
+        }
+        catch (Exception ex)
+        {
+            SetBanner($"Could not fill in the gaps: {ex.Message}", true);
+            AppLog.Error("Backfill", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
     /// Remove the leftover folders, contents and all. Everything in them is on the
     /// junk list and the files go to the Recycle Bin where the drive has one, so
     /// this is recoverable - but it is still a deletion, so the caller confirms

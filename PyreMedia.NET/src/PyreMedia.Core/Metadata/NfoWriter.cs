@@ -55,8 +55,19 @@ public static class NfoWriter
             El("title", movie.Title),
             El("originaltitle", movie.Title),
             El("plot", movie.Overview),
+            El("tagline", movie.Tagline),
             El("year", movie.Year),
-            El("premiered", movie.ReleaseDate));
+            El("premiered", movie.ReleaseDate),
+            El("mpaa", movie.Certification),
+            El("runtime", movie.RuntimeMinutes?.ToString()));
+
+        root.Add(Ratings(movie.Rating));
+        root.Add(Many("genre", movie.Genres));
+        root.Add(Many("country", movie.Countries));
+        root.Add(Many("studio", movie.Studios));
+        root.Add(Crew("director", movie.Directors));
+        root.Add(Crew("credits", movie.Writers));
+        root.Add(Actors(movie.Cast));
 
         if (!string.IsNullOrWhiteSpace(movie.TmdbId))
         {
@@ -164,7 +175,22 @@ public static class NfoWriter
             El("plot", show.Overview),
             El("premiered", show.FirstAired),
             El("year", show.Year),
-            El("studio", show.Network));
+            El("studio", show.Network),
+            El("status", show.Status),
+            El("mpaa", show.Certification),
+            El("runtime", show.RuntimeMinutes?.ToString()));
+
+        root.Add(Ratings(show.Rating));
+        root.Add(Many("genre", show.Genres));
+
+        // The network is already written above as the first studio; the rest
+        // are the companies behind it, and repeating the first would give Kodi
+        // the same name twice.
+        root.Add(Many("studio", show.Studios.Where(x =>
+            !string.Equals(x, show.Network, StringComparison.OrdinalIgnoreCase))));
+
+        root.Add(Crew("credits", show.Creators));
+        root.Add(Actors(show.Cast));
 
         // Kodi shows this on the series page and uses it to decide whether a
         // series is complete. Specials are season 0 and are not counted.
@@ -203,7 +229,17 @@ public static class NfoWriter
                 El("episode", episode.Number.ToString()),
                 El("plot", episode.Overview),
                 El("aired", episode.FirstAired),
-                El("productioncode", episode.ProductionCode));
+                El("productioncode", episode.ProductionCode),
+                El("runtime", episode.RuntimeMinutes?.ToString()));
+
+            root.Add(Ratings(episode.Rating));
+            root.Add(Crew("director", episode.Directors));
+            root.Add(Crew("credits", episode.Writers));
+
+            // Guests only. The regular cast belongs to the series and Kodi
+            // merges the two itself; writing it into all fifty episodes as well
+            // would treble the size of a season's metadata to say nothing new.
+            root.Add(Actors(episode.GuestStars));
 
             // The show id, not the episode's - Kodi matches episodes through their
             // series, and TheTVDB is what the legacy pipeline is keyed on.
@@ -498,6 +534,74 @@ public static class NfoWriter
     /// <summary>An element, or nothing at all when there's no value to write.</summary>
     private static XElement? El(string name, string? value)
         => string.IsNullOrWhiteSpace(value) ? null : new XElement(name, value);
+
+    /// <summary>
+    /// How many of a cast list to write.
+    ///
+    /// TMDb's aggregate credits for a long-running series run to several
+    /// hundred people, most of them one-line parts from a single episode.
+    /// Kodi shows the top of the list and nobody scrolls a cast of four
+    /// hundred, so the tail is weight in every .nfo for no reading anybody
+    /// does. Billing order decides who stays, which is the order the credits
+    /// themselves chose.
+    /// </summary>
+    private const int MaxCast = 30;
+
+    private static IEnumerable<XElement> Many(string name, IEnumerable<string> values) =>
+        values.Where(v => !string.IsNullOrWhiteSpace(v))
+              .Distinct(StringComparer.OrdinalIgnoreCase)
+              .Select(v => new XElement(name, v));
+
+    /// <summary>Crew as Kodi writes them - the name alone, one element each.</summary>
+    private static IEnumerable<XElement> Crew(string name, IEnumerable<Models.Person> people) =>
+        Many(name, people.Select(p => p.Name));
+
+    /// <summary>
+    /// Kodi's actor block. Order is written where the source gave one, because
+    /// Kodi sorts on it and a cast in the wrong order reads as a different film.
+    /// </summary>
+    private static IEnumerable<XElement> Actors(IEnumerable<Models.Person> cast)
+    {
+        var ordered = cast.Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                          .OrderBy(p => p.Order ?? int.MaxValue)
+                          .Take(MaxCast)
+                          .ToList();
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var p = ordered[i];
+
+            yield return new XElement("actor",
+                new XElement("name", p.Name),
+                El("role", p.Role),
+                new XElement("order", (p.Order ?? i).ToString()),
+                El("thumb", p.ThumbUrl));
+        }
+    }
+
+    /// <summary>
+    /// The ratings block in the form Kodi has used since v17.
+    ///
+    /// Named and attributed rather than a bare number, because a library can
+    /// hold scores from several sources and a value with no source attached
+    /// cannot be updated later without guessing whose it was.
+    /// </summary>
+    private static XElement? Ratings(Models.Rating? rating)
+    {
+        if (rating is null) return null;
+
+        var one = new XElement("rating",
+            new XAttribute("name", rating.Source),
+            new XAttribute("max", ((int)rating.Max).ToString()),
+            new XAttribute("default", "true"),
+            new XElement("value", rating.Value.ToString("0.0",
+                System.Globalization.CultureInfo.InvariantCulture)));
+
+        if (rating.Votes is { } votes and > 0)
+            one.Add(new XElement("votes", votes.ToString()));
+
+        return new XElement("ratings", one);
+    }
 
     /// <summary>
     /// Several root elements in one file, which is what Kodi wants for a

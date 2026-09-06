@@ -90,6 +90,21 @@ Writes Kodi-format `.nfo` sidecars and artwork, from TMDb and TheTVDB.
 - Poster, fanart and clear logo can be chosen from what the providers offer,
   with a picker rather than a lucky dip. Clear logos are enforced as transparent
   PNG, since that is the only thing Kodi can use.
+- **The people, not just the plot.** Cast in billing order with their characters
+  and headshots, directors, writers, genres, studios, countries, certificates,
+  runtimes and ratings. A rating carries the number of votes behind it, because
+  8.4 from eleven people and 8.4 from forty thousand are not the same number. A
+  score with fewer than two votes is not written at all - one person's opinion
+  is not a rating, and writing it would only distort the sorting.
+- **Fills in what is already on disk.** Files whose `.nfo` names its own title -
+  by TMDb, IMDb or TheTVDB id, in either the modern or the legacy spelling - can
+  be brought up to date without matching them again, because the id says which
+  title it is and nothing has to be guessed. A file that names no title is
+  listed for you rather than matched on a name that might belong to something
+  else.
+- Existing `.nfo` files are merged, never replaced. Watch state, your own
+  ratings, hand-added tags and artwork paths are carried across untouched;
+  fresher facts win only where both files have something to say.
 
 ### Organises music and audiobooks
 
@@ -261,7 +276,9 @@ The manual, with screenshots, is generated from the running application:
 
 ## Status
 
-Version 2.0.0 — everything the first release had, plus comics and ebooks.
+Version 2.1.0 — cast, crew and ratings in the `.nfo` files, a pass that fills
+those in on media you already have, and release screenshots cleared out with
+everything else.
 
 Some things are proven further than others, and it is worth saying which.
 Renaming, conflict handling and undo are exercised daily on a large library.

@@ -57,7 +57,18 @@ keys.local.json
 # Working notes. The public repository carries documentation, not the record of
 # how it got built - and a file of half-finished thoughts is the easiest way for
 # something private to reach it by accident.
-TODO.md
-BLURB.md
-docs/BLURB.md
-next.md
+#
+# Written as a rule rather than a list. A list only ignores the notes somebody
+# remembered to add to it, and the one that matters is always the one added
+# later - so everything at the root and under docs/ is ignored unless it is a
+# file this repository exists to publish.
+/*.md
+!/README.md
+!/LICENSE.md
+docs/*.md
+
+# Editor and tool state, for the same reason: named by shape rather than one by
+# one, so a tool nobody here has heard of yet is covered too.
+/.*/
+!/.vscode/
+!/.github/

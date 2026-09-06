@@ -814,6 +814,73 @@ public partial class MainWindow
     /// the user never explicitly picked, so it gets asked about - and the log has
     /// already named every folder by the time this appears.
     /// </summary>
+    /// <summary>
+    /// Fill in what the .nfo files already on disk are missing.
+    ///
+    /// Surveyed first and reported before anything is written, because the
+    /// interesting number is not how many files there are but how many can be
+    /// filled in without guessing - a file whose .nfo does not name its own
+    /// title is left alone and listed, never matched on a name that might
+    /// belong to something else.
+    /// </summary>
+    private async void OnFillGaps(object sender, RoutedEventArgs e)
+    {
+        // async void: an unhandled throw here would take the app down.
+        try
+        {
+            var survey = await Task.Run(() => _vm.SurveyGaps());
+
+            if (survey.Total == 0)
+            {
+                MessageBox.Show(this,
+                    "No video files found in the folders you have added.",
+                    "Fill in gaps", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var nl = Environment.NewLine;
+
+            if (survey.Ready.Count == 0)
+            {
+                MessageBox.Show(this,
+                    $"Nothing can be filled in without guessing." + nl + nl
+                    + $"{survey.Complete} file(s) already have everything." + nl
+                    + $"{survey.Unmatched.Count} are missing something but their .nfo does not "
+                    + "name which title they are, so they need matching in the usual way." + nl
+                    + $"{survey.NoNfo} have no .nfo at all - a rename writes one.",
+                    "Fill in gaps", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var sample = string.Join(nl, survey.Ready.Take(8)
+                .Select(t => $"   {t.Name}  -  {t.Gaps.Summary}"));
+
+            if (survey.Ready.Count > 8)
+                sample += $"{nl}   ...and {survey.Ready.Count - 8} more";
+
+            var answer = MessageBox.Show(this,
+                $"{survey.Ready.Count} file(s) can be filled in from the id their .nfo already "
+                + "carries, so nothing has to be guessed:" + nl + nl + sample + nl + nl
+                + $"{survey.Unmatched.Count} other file(s) are missing something but name no title, "
+                + $"and are left alone. {survey.Complete} already have everything." + nl + nl
+                + "Existing .nfo files are merged, not replaced: watch state, your own ratings, "
+                + "tags and artwork are kept exactly as they are." + nl + nl
+                + "Go ahead?",
+                "Fill in gaps", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes) return;
+
+            await _vm.FillGapsAsync(survey.Ready);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Fill in gaps", ex);
+
+            MessageBox.Show(this, $"Could not do it.{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+                "Fill in gaps", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void OnClearLeftovers(object sender, RoutedEventArgs e)
     {
         var folders = _vm.LeftoverFolders;

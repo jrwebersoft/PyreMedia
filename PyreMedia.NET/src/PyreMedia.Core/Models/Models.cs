@@ -25,6 +25,30 @@ public sealed class TvShow
     public string? FirstAired { get; init; }
     public List<Season> Seasons { get; init; } = [];
 
+    /// <summary>"Returning Series", "Ended" - Kodi shows it on the series page.</summary>
+    public string? Status { get; init; }
+
+    /// <summary>The certificate for the series, where a board has given one.</summary>
+    public string? Certification { get; init; }
+
+    /// <summary>Typical episode length in whole minutes, where the source says.</summary>
+    public int? RuntimeMinutes { get; init; }
+
+    public Rating? Rating { get; init; }
+
+    public IReadOnlyList<string> Genres { get; init; } = [];
+
+    /// <summary>
+    /// Every network or company behind the series. <see cref="Network"/> is
+    /// still the first of these, kept because the naming side reads it.
+    /// </summary>
+    public IReadOnlyList<string> Studios { get; init; } = [];
+
+    /// <summary>The regular cast, in billing order. Guests live on the episode.</summary>
+    public IReadOnlyList<Person> Cast { get; init; } = [];
+
+    public IReadOnlyList<Person> Creators { get; init; } = [];
+
     /// <summary>Four-digit première year, or empty when the source didn't give one.</summary>
     public string Year =>
         FirstAired is { Length: >= 4 } fa && fa[..4].All(char.IsDigit) ? fa[..4] : string.Empty;
@@ -101,6 +125,18 @@ public sealed class Episode
     public string? Source { get; init; }
 
     /// <summary>
+    /// Who appeared in this episode without being in the regular cast. Kodi
+    /// merges them with the series cast when it shows the episode.
+    /// </summary>
+    public IReadOnlyList<Person> GuestStars { get; init; } = [];
+
+    public IReadOnlyList<Person> Directors { get; init; } = [];
+    public IReadOnlyList<Person> Writers { get; init; } = [];
+
+    /// <summary>This episode's own score, which is not the series' score.</summary>
+    public Rating? Rating { get; init; }
+
+    /// <summary>
     /// The same episode with a picture taken from elsewhere.
     ///
     /// A copy rather than a setter, so a merge cannot quietly alter the episode
@@ -119,7 +155,15 @@ public sealed class Episode
         ProductionCode = ProductionCode,
         RuntimeMinutes = RuntimeMinutes,
         StillUrl = still,
-        Source = Source
+        Source = Source,
+
+        // Carried, not defaulted. This copy is what a merge keeps, so anything
+        // missing here is lost the moment two sources are combined - which is
+        // the ordinary case, not the exception.
+        GuestStars = GuestStars,
+        Directors = Directors,
+        Writers = Writers,
+        Rating = Rating
     };
 }
 

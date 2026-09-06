@@ -86,6 +86,12 @@
                     <ui:Button Icon="{ui:SymbolIcon FolderArrowRight24}" Content="Move completed"
                                Click="OnMoveCompletedVideo" Appearance="Secondary" />
 
+                    <!-- Fills in what existing .nfo files are short of, looking
+                         each title up by the id it already carries. It says what
+                         it found before it writes anything. -->
+                    <ui:Button Icon="{ui:SymbolIcon PersonAdd24}" Content="Fill in gaps"
+                               Click="OnFillGaps" Appearance="Secondary" Margin="8,0,0,0" />
+
                     <!-- Only there when there is something to clear, so it never
                          reads as an invitation to delete something. -->
                     <ui:Button Icon="{ui:SymbolIcon FolderProhibited20}"

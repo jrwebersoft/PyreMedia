@@ -186,7 +186,21 @@ public sealed class MetadataService : IDisposable
             Name = string.IsNullOrWhiteSpace(primary.Name) ? secondary.Name : primary.Name,
             Overview = primary.Overview ?? secondary.Overview,
             Network = primary.Network ?? secondary.Network,
-            FirstAired = primary.FirstAired ?? secondary.FirstAired
+            FirstAired = primary.FirstAired ?? secondary.FirstAired,
+
+            // Same rule as everything above: the primary source wins, the
+            // secondary fills what it did not have. Listed one by one rather
+            // than copied wholesale so that a field added later is a compile
+            // error here rather than a field that silently stops merging.
+            Status = primary.Status ?? secondary.Status,
+            Certification = primary.Certification ?? secondary.Certification,
+            RuntimeMinutes = primary.RuntimeMinutes ?? secondary.RuntimeMinutes,
+            Rating = primary.Rating ?? secondary.Rating,
+
+            Genres = primary.Genres.Count > 0 ? primary.Genres : secondary.Genres,
+            Studios = primary.Studios.Count > 0 ? primary.Studios : secondary.Studios,
+            Cast = primary.Cast.Count > 0 ? primary.Cast : secondary.Cast,
+            Creators = primary.Creators.Count > 0 ? primary.Creators : secondary.Creators
         };
 
         var bySeason = new Dictionary<int, Dictionary<int, Episode>>();
@@ -282,6 +296,22 @@ public sealed class MetadataService : IDisposable
 
     public Task<Movie?> GetMovieAsync(string tmdbId, CancellationToken ct = default)
         => _tmdb.GetMovieAsync(tmdbId, _settings.Language, ct);
+
+    /// <summary>The TMDb id for a title an .nfo names by somebody else's id.</summary>
+    public Task<string?> FindTmdbIdAsync(
+        string externalId, string source, bool isTv, CancellationToken ct = default)
+        => _tmdb.FindByExternalIdAsync(externalId, source, isTv, ct);
+
+    /// <summary>
+    /// A series fetched from ids alone, with no search and no candidate to
+    /// choose between - the backfill's whole premise is that the file already
+    /// said which series it is.
+    /// </summary>
+    public Task<TvShow?> GetShowByIdsAsync(
+        string tmdbId, string tvdbId, IProgress<string>? log = null, CancellationToken ct = default)
+        => GetShowAsync(
+            new ShowSearchResult { TmdbId = tmdbId, TvdbId = tvdbId, Name = string.Empty },
+            log, ct);
 
     public void Dispose() => _http.Dispose();
 }

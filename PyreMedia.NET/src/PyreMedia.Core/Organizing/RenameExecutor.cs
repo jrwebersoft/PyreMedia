@@ -517,6 +517,25 @@ public sealed class RenameExecutor(PyreMediaSettings settings, RenameHistory? hi
     /// folder with contents is never worth guessing about. Those are named in the
     /// log and left exactly where they are.
     /// </summary>
+    /// <summary>
+    /// Whether a folder holds no files at all, however deep.
+    ///
+    /// Asking whether it has any entries at all is the obvious question and the
+    /// wrong one: a release folder whose grabs have just been deleted still
+    /// holds the empty Screens folder they were in, so it read as occupied and
+    /// was left standing in the library root with nothing in it - and had to be
+    /// removed by hand, which is how it was noticed at all.
+    ///
+    /// A tree of empty folders is empty in the only sense that matters here -
+    /// there is nothing in it to lose. Unreadable is not empty: if the question
+    /// cannot be answered the folder stays.
+    /// </summary>
+    private static bool HoldsNoFiles(string dir)
+    {
+        try { return !Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(); }
+        catch (Exception) { return false; }
+    }
+
     private static void TidySourceFolders(RenamePlan plan, ExecutionResult result, IProgress<string>? log)
     {
         if (plan.SourceFoldersToTidy.Count == 0) return;
@@ -530,13 +549,15 @@ public sealed class RenameExecutor(PyreMediaSettings settings, RenameHistory? hi
             {
                 if (!Directory.Exists(dir)) continue;
 
-                if (Directory.EnumerateFileSystemEntries(dir).Any())
+                if (!HoldsNoFiles(dir))
                 {
                     kept.Add(Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar)));
                     continue;
                 }
 
-                Directory.Delete(dir);
+                // Recursive, because what is left may be a tree of empty
+                // folders rather than nothing at all.
+                Directory.Delete(dir, true);
                 removed++;
             }
             catch (Exception ex)

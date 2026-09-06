@@ -1051,6 +1051,18 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
                 reason = $"leftover {ext}";
             }
 
+            // Proof shots and screen grabs, which cannot be caught by extension
+            // because the same folder holds poster.jpg. Judged by name and by
+            // the folder holding them, and anything it is unsure of is refused.
+            //
+            // Only Tidy knew about these, and Tidy is a separate sweep nobody
+            // runs mid-rename - so a Reacher release left four 6 MB PNGs in a
+            // Screens folder, which kept the release folder from being empty,
+            // which left the folder sitting in the library root. One cause,
+            // both complaints.
+            else if (settings.DeleteJunkFiles && SceneImages.Judge(file) is { } why)
+                reason = why;
+
             if (reason is null) continue;
 
             plan.Actions.Add(new PlannedAction
@@ -1647,7 +1659,24 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
                         a.Subtitles.Contains(file, StringComparer.OrdinalIgnoreCase)))
                     continue;
 
-                if (!junkExts.Contains(ext)) continue;
+                if (!junkExts.Contains(ext))
+                {
+                    // Not on the junk list, and images never can be - the same
+                    // folder holds poster.jpg. A scene Screens folder is the
+                    // reason a combined show's release folder survived the
+                    // sweep with nothing in it but grabs.
+                    if (SceneImages.Judge(file) is not { } grab) continue;
+
+                    plan.Actions.Add(new PlannedAction
+                    {
+                        SourcePath = file,
+                        Status = PlanStatus.Delete,
+                        DeleteReason = $"{grab}, in a folder being emptied",
+                        StartsSelected = true
+                    });
+
+                    continue;
+                }
 
                 // A Kodi .nfo shares its extension with a scene release advert.
                 // Offering to delete the user's own library metadata as junk is

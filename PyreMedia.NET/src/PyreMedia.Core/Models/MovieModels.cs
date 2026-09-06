@@ -19,6 +19,31 @@ public sealed class Movie
     public string? Overview { get; init; }
     public string? ReleaseDate { get; init; }
 
+    /// <summary>The line on the poster, where the source has one.</summary>
+    public string? Tagline { get; init; }
+
+    /// <summary>Running time in whole minutes, as the provider states it.</summary>
+    public int? RuntimeMinutes { get; init; }
+
+    /// <summary>
+    /// The certificate - "PG-13", "15". Taken from one country's board rather
+    /// than averaged, because a rating is a legal judgement made somewhere
+    /// specific and blending two of them produces a rating nobody issued.
+    /// </summary>
+    public string? Certification { get; init; }
+
+    public Rating? Rating { get; init; }
+
+    public IReadOnlyList<string> Genres { get; init; } = [];
+    public IReadOnlyList<string> Studios { get; init; } = [];
+    public IReadOnlyList<string> Countries { get; init; } = [];
+
+    /// <summary>Billed cast, in billing order.</summary>
+    public IReadOnlyList<Person> Cast { get; init; } = [];
+
+    public IReadOnlyList<Person> Directors { get; init; } = [];
+    public IReadOnlyList<Person> Writers { get; init; } = [];
+
     private readonly string? _year;
 
     /// <summary>
