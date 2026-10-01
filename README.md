@@ -282,9 +282,9 @@ The manual, with screenshots, is generated from the running application:
 
 ## Status
 
-Version 2.2.0 — the year in an episode filename by default, and a truncation
-check that no longer refuses a good remux for the difference between two
-containers' idea of the same number.
+Version 2.2.1 — the year in an episode filename by default, a truncation check
+that no longer refuses a good remux for the difference between two containers'
+idea of the same number, and a manual photographed against this build.
 
 Some things are proven further than others, and it is worth saying which.
 Renaming, conflict handling and undo are exercised daily on a large library.
