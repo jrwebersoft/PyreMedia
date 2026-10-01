@@ -2036,6 +2036,16 @@ Console.WriteLine("\n=== saved formats show as words ===");
     Check("a title and year format too",
         NameTokens.NameTitleYear("{0} ({1})") == "{title} ({year})");
 
+    // The fifth one, added when episodes learned to carry the year. Without a
+    // name for it the settings box would show a saved "{4}" as a bare number
+    // and leave somebody to work out which of the five it was.
+    Check("the year comes back in words as well, not as a number",
+        NameTokens.NameEpisode("{0} ({4}) {1}x{3} {2}")
+            == "{title} ({year}) {season}x{episode} {name}");
+
+    Check("which is the shipped default, spelled the way it is stored",
+        NameTokens.NameEpisode("{0} ({4}) {1}x{3} {2}") == NameFormatter.DefaultTvFileFormat);
+
     Check("a format already in words is untouched",
         NameTokens.NameEpisode("{title} {season}x{episode}") == "{title} {season}x{episode}");
 
@@ -2178,7 +2188,14 @@ Console.WriteLine("\n=== season folders, and the setting that decides them ===")
     try
     {
         // On: episodes gather under Season 01. This is what the checkbox says.
-        var moving = new PyreMediaSettings { MoveTvFiles = true };
+        var moving = new PyreMediaSettings
+        {
+            MoveTvFiles = true,
+
+            // Pinned: this is about season folders, and the fixtures are
+            // named without a year. The default carries one now.
+            TvFileFormat = "{title} {season}x{episode} {name}"
+        };
         var withFolders = new MediaPlanner(moving).PlanTv(LadyGrace(), show);
 
         var wanted = Path.Combine(showDir, "Season 01");
@@ -6064,6 +6081,148 @@ Console.WriteLine("\n=== one title that cannot be fetched does not sink the swee
     }
 }
 
+Console.WriteLine("\n=== the year is in the shipped default, not only available in it ===");
+{
+    var root = Path.Combine(Path.GetTempPath(), $"pyremedia-def-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+
+    try
+    {
+        var file = Path.Combine(root, "Futurama.S01E06.1080p.WEB.h265-TRB.mkv");
+        File.WriteAllText(file, "x");
+
+        var show = new TvShow
+        {
+            Id = "1",
+            Name = "Futurama",
+            FirstAired = "1999-03-28",
+            Seasons =
+            [
+                new Season
+                {
+                    Number = 1,
+                    Episodes = [new Episode { SeasonNumber = 1, Number = 6, Name = "A Fishful of Dollars" }]
+                }
+            ]
+        };
+
+        MediaItem Futurama() => new()
+        {
+            Path = root,
+            DisplayName = "Futurama",
+            Kind = MediaKind.TvEpisode,
+            Files = [file],
+            SearchTitle = "Futurama",
+            MainFile = file
+        };
+
+        // Nothing set. Whatever a fresh install ships with is what this uses,
+        // which is the only way to test a default rather than a constant.
+        var plan = new MediaPlanner(new PyreMediaSettings { MoveTvFiles = false }).PlanTv(Futurama(), show);
+
+        Check("a fresh install names the file with the year in it",
+            plan.Actions.Any(a => a.TargetName == "Futurama (1999) 01x06 A Fishful of Dollars.mkv"));
+
+        // The folder said so already. The point of the change is that the two
+        // now agree, and that a file moved out of its folder keeps the fact
+        // that told it apart from another series of the same name.
+        Check("and the folder still says the same thing",
+            NameFormatter.BuildShowFolderName("{title} ({year})", "Futurama", "1999", '-')
+                == "Futurama (1999)");
+
+        // A series the provider has no date for. Every episode of it would
+        // otherwise be filed with an empty pair of brackets.
+        var undated = new TvShow
+        {
+            Id = "2",
+            Name = "Some Pilot",
+            Seasons =
+            [
+                new Season
+                {
+                    Number = 1,
+                    Episodes = [new Episode { SeasonNumber = 1, Number = 1, Name = "One" }]
+                }
+            ]
+        };
+
+        var bare = Path.Combine(root, "Some.Pilot.S01E01.mkv");
+        File.WriteAllText(bare, "x");
+
+        var undatedPlan = new MediaPlanner(new PyreMediaSettings { MoveTvFiles = false })
+            .PlanTv(new MediaItem
+            {
+                Path = root,
+                DisplayName = "Some Pilot",
+                Kind = MediaKind.TvEpisode,
+                Files = [bare],
+                SearchTitle = "Some Pilot",
+                MainFile = bare
+            }, undated);
+
+        Check("a series with no year gets no empty brackets from the default",
+            undatedPlan.Actions.Any(a => a.TargetName == "Some Pilot 01x01 One.mkv"));
+    }
+    finally
+    {
+        try { Directory.Delete(root, true); } catch (Exception) { /* scratch */ }
+    }
+}
+
+Console.WriteLine("\n=== an episode filename can carry the series year ===");
+{
+    static string Name(string format, string year = "1999") =>
+        NameFormatter.BuildEpisodeFileName(
+            format, "Futurama", "11", "06", "Late Bloomers", '-', year);
+
+    // The whole point. The folder said "Futurama (1999)" and the file did not,
+    // because {year} was a folder token and episodes had no way to ask for it.
+    Check("the year lands where the format puts it",
+        Name("{title} ({year}) {season}x{episode} {name}")
+            == "Futurama (1999) 11x06 Late Bloomers");
+
+    Check("and the format that was already in use is unchanged",
+        Name("{title} {season}x{episode} {name}") == "Futurama 11x06 Late Bloomers");
+
+    Check("it can go anywhere in the name, not only after the title",
+        Name("{title} {season}x{episode} {name} ({year})")
+            == "Futurama 11x06 Late Bloomers (1999)");
+
+    // The aliases, so somebody writing the obvious thing gets it.
+    Check("seriesyear and showyear mean the same",
+        Name("{title} {seriesyear} {season}x{episode}") == "Futurama 1999 11x06"
+        && Name("{title} {showyear} {season}x{episode}") == "Futurama 1999 11x06");
+
+    // The case that would have produced "Firefly () 01x01" on every file of a
+    // series the provider has no first-aired date for. The folder builder has
+    // refused that shape since it was written; the file builder now does too.
+    Check("a series with no year loses the brackets, not just their contents",
+        Name("{title} ({year}) {season}x{episode} {name}", "")
+            == "Futurama 11x06 Late Bloomers");
+
+    Check("square brackets are treated the same way",
+        Name("{title} [{year}] {season}x{episode}", "") == "Futurama 11x06");
+
+    // A separator this cannot reason about. It closes the spaces and stops -
+    // guessing at the dash would be renaming a file nobody asked to rename.
+    Check("a bare separator is left alone beyond closing the gap",
+        Name("{title} - {year} {season}x{episode}", "") == "Futurama - 11x06");
+
+    Check("a real year is untouched by any of that",
+        Name("{title} [{year}] {season}x{episode}") == "Futurama [1999] 11x06");
+
+    // Still the old behaviour for a format that cannot be formatted at all.
+    Check("a broken format still falls back rather than throwing",
+        Name("{title} {9} {season}") == "Futurama (1999) 11x06 Late Bloomers");
+
+    // And the multi-episode path takes it too, since it formats separately.
+    Check("a double episode carries the year as well",
+        NameFormatter.BuildEpisodeFileName(
+            "{title} ({year}) {season}x{episode} {name}", "Futurama",
+            "11", "06-07", "Late Bloomers & The Next One", '-', "1999")
+        == "Futurama (1999) 11x06-07 Late Bloomers & The Next One");
+}
+
 Console.WriteLine("\n=== a backfill only touches what names itself ===");
 {
     var root = Path.Combine(Path.GetTempPath(), $"pyremedia-back-{Guid.NewGuid():N}");
@@ -7552,7 +7711,14 @@ Console.WriteLine("\n=== a saved season shift, and what the Renumber screen must
 
     try
     {
-        var settings = new PyreMediaSettings { MoveTvFiles = false };
+        var settings = new PyreMediaSettings
+        {
+            MoveTvFiles = false,
+
+            // Pinned: this is about episode offsets, not about what the
+            // default format puts in a name.
+            TvFileFormat = "{title} {season}x{episode} {name}"
+        };
         settings.SetEpisodeOffset("555", 1, 2);
 
         Check("the shift is stored per show and season",
@@ -7892,6 +8058,104 @@ Console.WriteLine("\n=== asking a shorter question when the first finds nothing 
     Check("two words are never cut to one", Ladder("Some Show").Count == 0);
 
     Check("nor is a single word touched", Ladder("Firefly").Count == 0);
+}
+
+Console.WriteLine("\n=== Lanterns: an MP4 header against an mkvmerge statistic ===");
+{
+    // Every number measured off the real files. Lanterns is an AMZN WEB-DL of
+    // HEVC in MP4; the app remuxes it to Matroska, and episode one refused
+    // twice with "the video (eng) track runs 56:25 against the 56:28 it ran
+    // before - truncated". Nothing was missing.
+    //
+    // An MP4 has no per-track DURATION tag, so the source figure is ffprobe's
+    // own field, taken from the track header. mkvmerge writes a tag, and the
+    // tag is its own count. The gap between them is not footage.
+
+    // The source: ffprobe's field, which agrees with the container and with
+    // 81,246 frames at 24000/1001.
+    MediaStream FromHeader(int index, StreamKind kind, double seconds) => new()
+    {
+        Index = index, Kind = kind, Codec = kind == StreamKind.Video ? "hevc" : "eac3",
+        Language = "eng", Seconds = seconds, SecondsMeasured = false
+    };
+
+    // The output: mkvmerge's statistics tag.
+    MediaStream FromTag(int index, StreamKind kind, double seconds) => new()
+    {
+        Index = index, Kind = kind, Codec = kind == StreamKind.Video ? "hevc" : "eac3",
+        Language = "eng", Seconds = seconds, SecondsMeasured = true
+    };
+
+    var kept = new List<MediaStream>
+    {
+        FromHeader(0, StreamKind.Video, 3388.635),
+        FromHeader(1, StreamKind.Audio, 3388.608)
+    };
+
+    var pilot = new MediaInfo
+    {
+        Path = @"Lanterns (2026) 01x01 Pilot.mp4",
+        DurationSeconds = 3388.640,
+        Streams = [.. kept]
+    };
+
+    // The remux as mkvmerge actually writes it: container intact, video tag a
+    // little over three seconds short of it.
+    var remuxed = new MediaInfo
+    {
+        Path = "out.mkv",
+        DurationSeconds = 3388.640,
+        Streams = [FromTag(0, StreamKind.Video, 3385.5), FromTag(1, StreamKind.Audio, 3388.608)]
+    };
+
+    Check("a header figure and a muxer's statistic are not compared with each other",
+        DurationCheck.Failed(pilot, remuxed, kept) is null);
+
+    // Why it passed on six episodes and failed on the seventh: the same gap,
+    // measured on the real remuxes, sat under the tolerance until the episode
+    // got long enough. Nothing about the content changed.
+    foreach (var gap in new[] { 0.061, 0.386, 1.013, 1.014, 1.870, 2.512, 3.14 })
+    {
+        Check($"the same shape of gap is refused whatever its size ({gap:0.000}s)",
+            DurationCheck.Failed(pilot, new MediaInfo
+            {
+                Path = "out.mkv",
+                DurationSeconds = 3388.640,
+                Streams =
+                [
+                    FromTag(0, StreamKind.Video, 3388.635 - gap),
+                    FromTag(1, StreamKind.Audio, 3388.608)
+                ]
+            }, kept) is null);
+    }
+
+    // The control, and the reason this is narrowed rather than switched off.
+    // Both sides tagged is the ordinary Matroska case and still compared.
+    var mkvSource = new MediaInfo
+    {
+        Path = "in.mkv",
+        DurationSeconds = 3388.640,
+        Streams = [FromTag(0, StreamKind.Video, 3388.635), FromTag(1, StreamKind.Audio, 3388.608)]
+    };
+
+    Check("two tags that disagree by minutes is still a truncation",
+        DurationCheck.Failed(mkvSource, new MediaInfo
+        {
+            Path = "out.mkv",
+            DurationSeconds = 1800,
+            Streams = [FromTag(0, StreamKind.Video, 1800), FromTag(1, StreamKind.Audio, 1800)]
+        }, [FromTag(0, StreamKind.Video, 3388.635), FromTag(1, StreamKind.Audio, 3388.608)]) is not null);
+
+    // And the net behind it. With the per-track comparison standing down, a
+    // genuinely short file is still caught by the container against the
+    // longest track that was kept - which is the check that measures minutes.
+    Check("a half-length output is still refused with the per-track check silent",
+        DurationCheck.Failed(pilot, new MediaInfo
+        {
+            Path = "out.mkv",
+            DurationSeconds = 1700,
+            Streams = [FromTag(0, StreamKind.Video, 1700), FromTag(1, StreamKind.Audio, 1700)]
+        }, kept) is not null);
 }
 
 Console.WriteLine("\n=== Babe (1995): a subtitle tag two muxers disagree about ===");

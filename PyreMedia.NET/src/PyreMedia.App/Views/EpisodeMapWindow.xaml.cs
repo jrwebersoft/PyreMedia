@@ -445,7 +445,7 @@ public partial class EpisodeMapWindow
         => NameFormatter.BuildEpisodeFileName(
                _settings.TvFileFormat, _show.Name, e,
                _settings.SeasonNumZeroPadding, _settings.EpisodeNumZeroPadding,
-               _settings.FilenameReplaceChar)
+               _settings.FilenameReplaceChar, _show.Year)
            + Path.GetExtension(_item.Files.FirstOrDefault() ?? ".mkv");
 
     /// <summary>

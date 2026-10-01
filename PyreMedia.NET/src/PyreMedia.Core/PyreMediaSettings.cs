@@ -212,7 +212,7 @@ public sealed class PyreMediaSettings
     /// episode's own title. Season and episode arrive already zero-padded.
     /// The old numeric form still works for anything already saved.
     /// </summary>
-    public string TvFileFormat { get; set; } = "{title} {season}x{episode} {name}";
+    public string TvFileFormat { get; set; } = Naming.NameFormatter.DefaultTvFileFormat;
 
     public int SeasonNumZeroPadding { get; set; } = 2;
     public int EpisodeNumZeroPadding { get; set; } = 2;

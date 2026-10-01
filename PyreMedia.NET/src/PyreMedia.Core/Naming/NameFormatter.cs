@@ -52,13 +52,15 @@ public static class NameFormatter
         Episode episode,
         int seasonPad,
         int episodePad,
-        char replacement)
+        char replacement,
+        string seriesYear = "")
         => BuildEpisodeFileName(
             format, seriesName,
             episode.SeasonNumber.ToString().PadLeft(seasonPad, '0'),
             episode.Number.ToString().PadLeft(episodePad, '0'),
             episode.Name,
-            replacement);
+            replacement,
+            seriesYear);
 
     /// <summary>
     /// Explicit-text overload, so a multi-episode file can pass "01-02" as the
@@ -71,14 +73,16 @@ public static class NameFormatter
         string seasonText,
         string episodeText,
         string episodeName,
-        char replacement)
+        char replacement,
+        string seriesYear = "")
     {
         string name;
 
         try
         {
             name = string.Format(
-                NameTokens.ForEpisode(format), seriesName, seasonText, episodeName, episodeText);
+                NameTokens.ForEpisode(format),
+                seriesName, seasonText, episodeName, episodeText, seriesYear);
         }
         catch (FormatException)
         {
@@ -89,8 +93,14 @@ public static class NameFormatter
             // is visible as a name that isn't what they asked for.
             name = string.Format(
                 NameTokens.ForEpisode(DefaultTvFileFormat),
-                seriesName, seasonText, episodeName, episodeText);
+                seriesName, seasonText, episodeName, episodeText, seriesYear);
         }
+
+        // A series with no year would otherwise be filed as "Firefly () 01x01",
+        // which is the shape the folder builder has always refused to produce.
+        // The brackets go with the value they were wrapping, and the spaces
+        // that held them close up.
+        name = DropEmptyBrackets(name);
 
         var clean = Sanitize(name, replacement);
 
@@ -106,13 +116,51 @@ public static class NameFormatter
         return clean;
     }
 
+    /// <summary>
+    /// Tidy up after a token that had nothing to put in it.
+    ///
+    /// Only brackets, and only empty ones. A format saying "{title} ({year})"
+    /// with no year should read "Firefly", not "Firefly ()" - but a format
+    /// saying "{title} - {year}" is a separator this cannot reason about, and
+    /// guessing at one would be the kind of cleverness that renames a file
+    /// somebody did not ask for. That case closes its spaces and stops there.
+    /// </summary>
+    private static string DropEmptyBrackets(string name)
+    {
+        if (!name.Contains('(') && !name.Contains('[')) return Squeeze(name);
+
+        return Squeeze(EmptyBrackets.Replace(name, ""));
+    }
+
+    private static string Squeeze(string name) =>
+        Runs.Replace(name, " ").Trim();
+
+    private static readonly Regex EmptyBrackets = new(
+        @"\(\s*\)|\[\s*\]", RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    private static readonly Regex Runs = new(
+        @"[ 	]{2,}", RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
     /// <summary>The shipped format, used when a custom one won't format.</summary>
     /// <summary>
     /// Named rather than numbered: "{0} {1}x{3} {2}" said nothing about which
     /// number was the episode, and the indices didn't even run in order. The
     /// numeric form is still accepted for anything already saved.
     /// </summary>
-    public const string DefaultTvFileFormat = "{title} {season}x{episode} {name}";
+    /// <summary>
+    /// The year is in it because a filename that does not carry one is
+    /// ambiguous in exactly the way a folder name is: two series share a title
+    /// far more often than two series share a title and a year, and a file
+    /// moved out of its folder loses the only thing that told them apart. The
+    /// folder format has always said so; this now agrees with it, and with the
+    /// movie format, which has carried the year since the beginning.
+    ///
+    /// A series with no year loses the brackets rather than keeping an empty
+    /// pair, so this is safe as the fallback for a format that will not format.
+    /// </summary>
+    public const string DefaultTvFileFormat = "{title} ({year}) {season}x{episode} {name}";
 
     /// <summary>
     /// Make a string safe as a filename. Invalid characters become

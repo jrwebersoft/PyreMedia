@@ -113,6 +113,28 @@ public static class DurationCheck
             // the container's figure wearing its name. See Believable.
             if (!Believable(before)) continue;
 
+            // And only where both sides are the same kind of number.
+            //
+            // An MP4 carries no per-track DURATION tag, so the figure for its
+            // picture is ffprobe's own field, which comes from the track header
+            // and agrees with the container. mkvmerge writes a real tag, and
+            // its tag is its own count of what it laid down. Comparing one
+            // against the other is comparing a header against a statistic, and
+            // the difference is not footage.
+            //
+            // Measured on Lanterns, an AMZN WEB-DL of HEVC in MP4. Across six
+            // episodes remuxed successfully the tag ran short of the container
+            // by 0.061, 0.386, 1.013, 1.014, 1.870 and 2.512 seconds - every
+            // one of them under the three-second tolerance, which is the only
+            // reason they passed. The seventh was a longer episode, the same
+            // gap came out at just over three seconds, and a 8.8 GB remux with
+            // nothing wrong with it was thrown away twice.
+            //
+            // The whole-file check still runs behind this and compares the
+            // container against the longest kept track, so a real truncation -
+            // which is measured in minutes - is still caught.
+            if (before.SecondsMeasured != after.SecondsMeasured) continue;
+
             // Three seconds covers container rounding and the last frame of a
             // GOP. Truncation is measured in minutes.
             if (before.Seconds - after.Seconds <= 3.0) continue;

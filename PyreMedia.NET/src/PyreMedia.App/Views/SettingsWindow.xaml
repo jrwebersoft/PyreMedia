@@ -148,7 +148,7 @@
                                 <ui:TextBox x:Name="TxtFormat" Margin="0,0,0,4" />
                                 <TextBlock FontSize="11" Margin="0,0,0,12" TextWrapping="Wrap"
                                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                           Text="{}{title} series   {season} padded   {episode} padded   {name} episode title.  The old {}{0}-{3} numbering still works." />
+                                           Text="{}{title} series   {season} padded   {episode} padded   {name} episode title   {year} series year.  Empty brackets close up, so &quot;{}{title} ({year})&quot; is just the title for a series with no year.  The old numbering still works too, {}{0} to {}{4}, where {}{4} is the year." />
                                 <TextBlock x:Name="TxtFormatPreview" FontSize="11" Margin="0,0,0,12"
                                            Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
 

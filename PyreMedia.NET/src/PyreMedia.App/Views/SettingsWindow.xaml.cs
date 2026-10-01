@@ -356,19 +356,23 @@ public partial class SettingsWindow
                 Name = "Out of Gas"
             };
 
+            // A year in the example, so {year} can be seen working rather than
+            // taken on trust - and Firefly has one worth showing.
             var name = NameFormatter.BuildEpisodeFileName(
                 TxtFormat.Text,
                 "Firefly",
                 sample,
                 (int)(NumSeasonPad.Value ?? 2),
                 (int)(NumEpisodePad.Value ?? 2),
-                _settings.FilenameReplaceChar);
+                _settings.FilenameReplaceChar,
+                "2002");
 
             TxtFormatPreview.Text = $"Example:  {name}.mkv";
         }
         catch (FormatException)
         {
-            TxtFormatPreview.Text = "That format string isn't valid - check the {0}-{3} placeholders.";
+            TxtFormatPreview.Text = "That format string isn't valid - check the placeholders: "
+                                    + string.Join("  ", NameTokens.EpisodeNames) + ".";
         }
     }
 

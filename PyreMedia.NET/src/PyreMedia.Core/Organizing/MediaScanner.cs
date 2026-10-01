@@ -1321,7 +1321,7 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
             return NameFormatter.BuildEpisodeFileName(
                 settings.TvFileFormat, show.Name, first,
                 settings.SeasonNumZeroPadding, settings.EpisodeNumZeroPadding,
-                settings.FilenameReplaceChar);
+                settings.FilenameReplaceChar, show.Year);
         }
 
         var pad = settings.EpisodeNumZeroPadding;
@@ -1339,7 +1339,8 @@ public sealed class MediaPlanner(PyreMediaSettings settings)
             first.SeasonNumber.ToString().PadLeft(settings.SeasonNumZeroPadding, '0'),
             episodeText,
             titles,
-            settings.FilenameReplaceChar);
+            settings.FilenameReplaceChar,
+            show.Year);
     }
 
     private string BuildTarget(

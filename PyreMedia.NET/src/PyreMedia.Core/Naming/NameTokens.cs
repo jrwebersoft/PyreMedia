@@ -24,6 +24,7 @@ public static class NameTokens
         ["season"] = 1,
         ["name"] = 2, ["episodetitle"] = 2, ["episodename"] = 2, ["eptitle"] = 2,
         ["episode"] = 3, ["ep"] = 3, ["episodenumber"] = 3,
+        ["year"] = 4, ["seriesyear"] = 4, ["showyear"] = 4,
     };
 
     /// <summary>Placeholders for a movie or show folder: just a title and a year.</summary>
@@ -34,7 +35,8 @@ public static class NameTokens
     };
 
     /// <summary>The placeholders an episode format understands, for showing the user.</summary>
-    public static string[] EpisodeNames => ["{title}", "{season}", "{episode}", "{name}"];
+    public static string[] EpisodeNames =>
+        ["{title}", "{season}", "{episode}", "{name}", "{year}"];
 
     /// <summary>The placeholders a movie or folder format understands.</summary>
     public static string[] TitleYearNames => ["{title}", "{year}"];
@@ -62,7 +64,7 @@ public static class NameTokens
     /// </summary>
     private static readonly Dictionary<int, string> EpisodePreferred = new()
     {
-        [0] = "title", [1] = "season", [2] = "name", [3] = "episode"
+        [0] = "title", [1] = "season", [2] = "name", [3] = "episode", [4] = "year"
     };
 
     private static readonly Dictionary<int, string> TitleYearPreferred = new()

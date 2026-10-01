@@ -39,8 +39,14 @@ are your discs and your rips; nothing here treats them as disposable.
 Episodes and films are renamed to a pattern you set, using readable placeholders
 rather than numbered ones:
 
-    {title} {season}x{episode} {name}      ->  Firefly 01x05 Out of Gas
-    {title} ({year})                       ->  Blade Runner 2049 (2017)
+    {title} ({year}) {season}x{episode} {name}  ->  Firefly (2002) 01x05 Out of Gas
+    {title} ({year})                            ->  Blade Runner 2049 (2017)
+
+The first of those is the default, year included. Two series share a title far
+more often than two series share a title and a year, and a file lifted out of
+its folder loses the only thing that told them apart - so an episode carries it
+for the same reason a film always has. A series the provider has no year for
+loses the brackets rather than keeping an empty pair.
 
 `{series}`, `{show}`, `{episodetitle}` and others work as synonyms, case is
 ignored, and a mistyped placeholder falls back to the default rather than
@@ -276,9 +282,9 @@ The manual, with screenshots, is generated from the running application:
 
 ## Status
 
-Version 2.1.0 — cast, crew and ratings in the `.nfo` files, a pass that fills
-those in on media you already have, and release screenshots cleared out with
-everything else.
+Version 2.2.0 — the year in an episode filename by default, and a truncation
+check that no longer refuses a good remux for the difference between two
+containers' idea of the same number.
 
 Some things are proven further than others, and it is worth saying which.
 Renaming, conflict handling and undo are exercised daily on a large library.
